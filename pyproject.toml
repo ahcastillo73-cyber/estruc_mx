@@ -18,12 +18,18 @@ dependencies = [
 # 3.8 es la primera con binarios para Windows, Linux y macOS arm64; exige Python 3.12+
 opensees = ["openseespy>=3.8"]
 visual = ["pyvista>=0.44"]
+gui = ["PySide6>=6.6", "pyvista>=0.44", "pyvistaqt>=0.11"]
 # Reporte PDF (ReportLab) y Word (python-docx); figuras con matplotlib
 reporte = ["matplotlib>=3.8", "reportlab>=4.0", "python-docx>=1.1"]
 dev = ["pytest>=8"]
+# Solo para las pruebas de la ventana; necesita PySide6 (extra gui)
+prueba-gui = ["pytest-qt>=4.4"]
 
 [project.scripts]
 estruc-mx = "estruc_mx.cli:main"
+
+[project.gui-scripts]
+estruc-mx-gui = "estruc_mx.app.ventana:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/estruc_mx"]

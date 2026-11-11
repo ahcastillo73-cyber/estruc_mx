@@ -5,6 +5,7 @@
     estruc-mx ver ejemplos/marco_3niveles.json --combinacion "1.1CM+SX"
     estruc-mx modal ejemplos/marco_3niveles.json --modos 12
     estruc-mx espectral ejemplos/marco_3niveles.json --direccion X --metodo CQC
+    estruc-mx gui ejemplos/marco_3niveles.json
     estruc-mx reporte ejemplos/marco_3niveles.json -o reporte.pdf --sistema marco_ductil_concreto
 """
 
@@ -57,6 +58,9 @@ def main(argv: list[str] | None = None) -> int:
     es.add_argument("--direccion", choices=["X", "Y"], default="X")
     es.add_argument("--metodo", choices=["CQC", "SRSS"], default="CQC")
 
+    g = sub.add_parser("gui", help="Abre la aplicación de escritorio")
+    g.add_argument("modelo", nargs="?")
+
     re = sub.add_parser("reporte", help="Reporte PDF o Word con modelo, cargas, modal, espectral y derivas")
     re.add_argument("modelo", nargs="?")
     re.add_argument("-o", "--salida", default="reporte.pdf", help="Archivo .pdf o .docx")
@@ -72,6 +76,10 @@ def main(argv: list[str] | None = None) -> int:
     re.add_argument("--sistemas", action="store_true", help="Lista los sistemas estructurales y sale")
 
     args = p.parse_args(argv)
+    if args.orden == "gui":
+        from .app.ventana import main as gui
+
+        return gui(["estruc-mx", *([args.modelo] if args.modelo else [])])
     if args.orden == "reporte" and args.sistemas:
         from .normas.ntc_sismo import DISTORSIONES_LIMITE
 
