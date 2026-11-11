@@ -212,6 +212,44 @@ def cortante(d: DatosReporte) -> list[Bloque]:
         ["Dirección", "Combinación modal", "V (kN)", "W (kN)", "V / W"],
         filas, titulo="Cortante basal del análisis modal espectral", texto={0, 1},
     ))
+    rev = d.revision
+    if rev is not None:
+        b.append(Titulo("Cortante basal mínimo", 2))
+        b.append(Parrafo(
+            "Si el cortante basal de diseño V0 del análisis modal es menor que el mínimo, las fuerzas de "
+            "diseño se multiplican por Vmin/V0. V0 es el cortante calculado por la reducción del espectro "
+            f"entre el factor Q·R ({d.factor_deriva:g}). "
+            + ("Los desplazamientos también se escalan." if rev.criterios.escalar_desplazamientos
+               else "Los desplazamientos no se escalan (NTC 2020, sección 1.7).")
+        ))
+        filas = [[k, f"{c.T1:.3f}", _f(c.V0, 1), _f(c.V0 / c.W, 4), _f(c.coeficiente, 4), _f(c.Vmin, 1),
+                  _f(c.factor, 3)] for k, c in rev.cortante.items()]
+        b.append(Tabla(
+            ["Dirección", "T1 (s)", "V0 (kN)", "V0 / W", "Mínimo / W", "Vmin (kN)", "Factor"],
+            filas, titulo="Revisión del cortante basal mínimo",
+        ))
+        origenes = sorted({c.origen for c in rev.cortante.values()})
+        b.append(Parrafo("Mínimo: " + "; ".join(origenes) + ".", "nota"))
+        if any(c.factor > 1 for c in rev.cortante.values()):
+            b.append(Parrafo("El cortante modal no alcanza el mínimo: las fuerzas de diseño de este reporte "
+                             "(muros, torsión) ya incluyen el factor de escala.", "aviso"))
+    b.append(Titulo("Cortante por entrepiso", 2))
+    dirs = [k for k, r in d.espectral.items() if r.cortantes_entrepiso]
+    if dirs:
+        zs = [z for z, _ in d.espectral[dirs[0]].cortantes_entrepiso]
+        filas = []
+        for i, z in enumerate(zs):
+            fila = [_f(z, 2)]
+            for k in dirs:
+                v = d.espectral[k].cortantes_entrepiso[i][1]
+                fila += [_f(v, 1)]
+                if rev is not None:
+                    fila += [_f(v * rev.cortante[k].factor, 1)]
+            filas.append(fila)
+        enc = ["Nivel (m)"]
+        for k in dirs:
+            enc += [f"V{k} (kN)"] + ([f"V{k} escalado (kN)"] if rev is not None else [])
+        b.append(Tabla(enc, filas, titulo="Cortante de entrepiso del análisis modal (abajo del nivel indicado)"))
     b.append(Titulo("Contribución por modo", 2))
     r0 = next(iter(d.espectral.values()))
     p = r0.propiedades
@@ -229,58 +267,129 @@ def cortante(d: DatosReporte) -> list[Bloque]:
     return b
 
 
-# --- 6. Derivas ----------------------------------------------------------------
+# --- 6. Torsión ----------------------------------------------------------------
+def torsion(d: DatosReporte) -> list[Bloque]:
+    rev = d.revision
+    if rev is None or not rev.pisos:
+        return []
+    b: list[Bloque] = [Titulo("Centros de masa y torsión accidental")]
+    b.append(Tabla(
+        ["Nivel (m)", "Masa (t)", "xCM (m)", "yCM (m)", "bx (m)", "by (m)"],
+        [[_f(p.z, 2), _f(p.masa, 2), _f(p.xc, 2), _f(p.yc, 2), _f(p.bx, 2), _f(p.by, 2)] for p in rev.pisos],
+        titulo="Centro de masa y dimensiones en planta por nivel",
+    ))
+    if not rev.torsion:
+        return b + [Parrafo("No se consideró la torsión accidental.", "aviso")]
+    b.append(Parrafo(
+        "La excentricidad estática ya está en el análisis modal, porque el modelo es tridimensional. La "
+        "accidental se aplica como un momento M = F·ea en cada piso, con F la fuerza del piso (diferencia de "
+        "cortantes de entrepiso) y ea medida perpendicularmente al sismo; su efecto se suma con el signo más "
+        "desfavorable al del análisis modal, para el sismo en cada dirección por separado."
+    ))
+    filas = []
+    for i, p in enumerate(rev.pisos):
+        fila = [_f(p.z, 2)]
+        for k in ("X", "Y"):
+            t = rev.torsion[k][i]
+            fila += [_f(t.fraccion, 3), _f(t.e, 2), _f(t.F, 1), _f(t.M, 1)]
+        filas.append(fila)
+    b.append(Tabla(
+        ["Nivel (m)", "ea/by", "ea (m)", "Fx (kN)", "M (kN·m)", "ea/bx", "ea (m)", "Fy (kN)", "M (kN·m)"],
+        filas, titulo="Torsión accidental: sismo en X (columnas 2 a 5) y en Y (6 a 9), sin escalar",
+    ))
+    b.extend(Parrafo(a, "nota") for a in rev.avisos)
+    return b
+
+
+# --- 7. Derivas ----------------------------------------------------------------
+def _tabla_derivas(niveles, por_comp, factor, limite, titulo) -> tuple[Tabla, float, dict[str, list[float]]]:
+    filas, peor = [], 0.0
+    curvas: dict[str, list[float]] = {k: [] for k in por_comp}
+    for z in niveles:
+        fila = [_f(z, 2)]
+        vmax = 0.0
+        for k, tabla in por_comp.items():
+            x = tabla.get(z)
+            v = (x.deriva if x else 0.0) * factor
+            curvas[k].append(v)
+            vmax = max(vmax, v)
+            fila += [f"{v:.5f}", getattr(x, "barra", None) or getattr(x, "elemento", "-") if x else "-"]
+            if hasattr(x, "gobierna"):
+                fila.append(x.gobierna)
+        peor = max(peor, vmax)
+        if limite is not None:
+            fila.append("Sí" if vmax <= limite else "NO")
+        filas.append(fila)
+    enc = ["Nivel (m)"]
+    con_comb = any(hasattr(x, "gobierna") for t in por_comp.values() for x in t.values())
+    for k in por_comp:
+        enc += [f"Δ/h {k}", f"Elemento {k}"] + ([f"Comb. {k}"] if con_comb else [])
+    if limite is not None:
+        enc.append("Cumple")
+    paso = 3 if con_comb else 2
+    texto = {0} | {j for i in range(len(por_comp)) for j in range(2 + paso * i, 1 + paso * (i + 1))}
+    if limite is not None:
+        texto.add(len(enc) - 1)
+    return Tabla(enc, filas, titulo=titulo, texto=texto), peor, curvas
+
+
 def derivas(d: DatosReporte) -> list[Bloque]:
     b: list[Bloque] = [Titulo("Distorsiones de entrepiso")]
     if not d.espectral:
         return b + [Parrafo("No se hizo análisis espectral: " + " ".join(d.avisos), "aviso")]
     limite, origen = d.opciones.limite()
     f = d.factor_deriva
-    b.append(Parrafo(
-        "Distorsión máxima por entrepiso entre las columnas"
-        + (" y los bordes verticales de los muros" if any(a.tipo == "muro" for a in d.modelo.areas) else "")
-        + ", del análisis modal espectral. "
-        f"Para compararla con el límite se multiplica por {f:g} (Q·R; por defecto la reducción del espectro)."
-    ))
+    rev = d.revision
+    muros = any(a.tipo == "muro" for a in d.modelo.areas)
+    b.append(Titulo("Seguridad contra colapso", 2))
+    texto = ("Distorsión máxima por entrepiso entre las columnas"
+             + (" y los bordes verticales de los muros" if muros else "") + ", del análisis modal espectral")
+    if rev is not None:
+        texto += (", más la torsión accidental"
+                  if rev.torsion else "") + f", combinando 100 % de un sismo con {rev.criterios.ortogonal * 100:.0f} % del otro"
+        por_comp = {k: {x.nivel: x for x in v} for k, v in rev.derivas.items()}
+    else:
+        por_comp = {k: {x.nivel: x for x in r.derivas} for k, r in d.espectral.items()}
+    b.append(Parrafo(texto + f". Para compararla con el límite se multiplica por {f:g} (Q·R; por defecto la "
+                     "reducción del espectro)."))
     if limite is None:
         b.append(Parrafo("No se indicó sistema estructural ni límite; la tabla no verifica el cumplimiento. "
                          "Usar --sistema o --deriva-limite.", "aviso"))
     else:
         b.append(Parrafo(f"Límite {limite:g}, {origen}."))
-
-    niveles = sorted({x.nivel for r in d.espectral.values() for x in r.derivas})
-    por_dir = {k: {x.nivel: x for x in r.derivas} for k, r in d.espectral.items()}
-    filas, peor = [], 0.0
-    for z in niveles:
-        fila = [_f(z, 2)]
-        for k in d.espectral:
-            x = por_dir[k].get(z)
-            v = x.deriva * f if x else 0.0
-            peor = max(peor, v)
-            fila += [f"{v:.5f}", x.barra if x else "-"]
-        if limite is not None:
-            v_max = max(por_dir[k][z].deriva * f for k in d.espectral if z in por_dir[k])
-            fila.append("Sí" if v_max <= limite else "NO")
-        filas.append(fila)
-    enc = ["Nivel (m)"]
-    for k in d.espectral:
-        enc += [f"Δ/h {k}", f"Elemento {k}"]
-    if limite is not None:
-        enc.append("Cumple")
-    texto = {0} | {2 + 2 * i for i in range(len(d.espectral))} | ({len(enc) - 1} if limite is not None else set())
-    b.append(Tabla(enc, filas, titulo="Distorsiones de entrepiso (ya multiplicadas por el factor)", texto=texto))
+    niveles = sorted({z for t in por_comp.values() for z in t})
+    tabla, peor, curvas = _tabla_derivas(niveles, por_comp, f, limite,
+                                         "Distorsiones de entrepiso para colapso (ya multiplicadas por el factor)")
+    b.append(tabla)
     if limite is not None:
         b.append(Parrafo(
             f"Distorsión máxima {peor:.5f} contra límite {limite:g}: " + ("cumple." if peor <= limite else "NO cumple."),
             "normal" if peor <= limite else "aviso",
         ))
-    curvas = {k: [por_dir[k][z].deriva * f if z in por_dir[k] else 0.0 for z in niveles] for k in d.espectral}
-    b.append(Figura(figuras.derivas(niveles, curvas, limite), "Perfil de distorsiones de entrepiso", 0.6))
-    b.append(Parrafo("Falta la revisión de limitación de daños (servicio) de las NTC.", "nota"))
+    b.append(Figura(figuras.derivas(niveles, curvas, limite), "Perfil de distorsiones para colapso", 0.6))
+
+    b.append(Titulo("Limitación de daños (servicio)", 2))
+    if rev is None or not rev.derivas_servicio:
+        b.append(Parrafo(
+            "No se revisó: el modelo no tiene espectro de servicio (espectro_servicio) ni se indicó el divisor "
+            "de servicio (--divisor-servicio).", "aviso"))
+        return b
+    lim_s = rev.criterios.limite_servicio
+    b.append(Parrafo(f"Distorsiones de servicio a partir de {rev.origen_servicio}, con la misma torsión y "
+                     f"combinación de componentes. Límite {lim_s:g} (0.002 con elementos no estructurales "
+                     "ligados a la estructura, 0.004 si están separados o soportan deformaciones apreciables)."))
+    por_s = {k: {x.nivel: x for x in v} for k, v in rev.derivas_servicio.items()}
+    tabla, peor_s, curvas_s = _tabla_derivas(niveles, por_s, 1.0, lim_s, "Distorsiones de entrepiso de servicio")
+    b.append(tabla)
+    b.append(Parrafo(
+        f"Distorsión de servicio máxima {peor_s:.5f} contra límite {lim_s:g}: "
+        + ("cumple." if peor_s <= lim_s else "NO cumple."), "normal" if peor_s <= lim_s else "aviso",
+    ))
+    b.append(Figura(figuras.derivas(niveles, curvas_s, lim_s), "Perfil de distorsiones de servicio", 0.6))
     return b
 
 
-# --- 7. Deformadas -------------------------------------------------------------
+# --- 8. Deformadas -------------------------------------------------------------
 MAX_COMBINACIONES = 6
 MAX_MODOS = 3
 
@@ -314,7 +423,7 @@ def deformadas(d: DatosReporte) -> list[Bloque]:
     return b
 
 
-# --- 8. Muros y losas ----------------------------------------------------------
+# --- 9. Muros y losas ----------------------------------------------------------
 _ENC_MURO = ["Muro", "Base (m)", "L (m)", "P (kN)", "V (kN)", "M (kN·m)", "V fuera (kN)", "M fuera (kN·m)"]
 
 
@@ -351,6 +460,17 @@ def muros_losas(d: DatosReporte) -> list[Bloque]:
             filas = [[a, _f(x.elevacion, 2), _f(x.longitud, 2), *(_f(re_.fuerzas_muros[a][c], 1) for c in COMPONENTES_MURO[:5])]
                      for a, x in bases.items()]
             b.append(Tabla(_ENC_MURO, filas, titulo=f"Fuerzas en muros, sismo en {k} ({re_.metodo}, máximos sin signo)"))
+    rev = d.revision
+    if bases and rev is not None and rev.fuerzas_muros:
+        b.append(Titulo("Fuerzas sísmicas de diseño en muros", 2))
+        b.append(Parrafo(
+            "Envolvente de 100 % de un sismo más " f"{rev.criterios.ortogonal * 100:.0f} % del perpendicular, con "
+            "la torsión accidental sumada con el signo más desfavorable y el factor de cortante mínimo. Son "
+            "valores sin signo, solo de sismo: para el diseño se combinan con las cargas de gravedad."
+        ))
+        filas = [[a, _f(x.elevacion, 2), _f(x.longitud, 2), *(_f(rev.fuerzas_muros[a][c], 1) for c in COMPONENTES_MURO[:5])]
+                 for a, x in bases.items() if a in rev.fuerzas_muros]
+        b.append(Tabla(_ENC_MURO, filas, titulo="Fuerzas sísmicas de diseño en la base de los muros"))
     losas = [a for a in m.areas if a.tipo == "losa"]
     if losas and r is not None:
         b.append(Titulo("Momentos en losas", 2))
@@ -379,6 +499,13 @@ def notas(d: DatosReporte) -> list[Bloque]:
         "Prueba de concepto (fase 0): revisar los resultados con un cálculo independiente antes de usarlos.",
         "Las distorsiones límite y el espectro paramétrico deben verificarse contra la edición vigente de las NTC.",
     ]
+    if d.revision is not None:
+        elementos.append(
+            "Revisión sísmica: el cortante mínimo (a_min = 0.04/R a 0.06/R según Ts), la combinación 100/30 y el "
+            "límite de servicio 0.002/0.004 se tomaron de las NTC Sismo 2020; la excentricidad accidental "
+            "[0.05 + 0.05(i − 1)/(n − 1)]·b y los valores de CFE son de memoria. Verificar todo contra la "
+            "edición 2023 antes de usarlo en un proyecto."
+        )
     if d.modelo.areas:
         elementos.append(
             "Muros y losas: los dos motores usan elementos de cáscara distintos (PyNite DKMQ, OpenSees ShellMITC4) "
@@ -394,6 +521,7 @@ SECCIONES: dict[str, Seccion] = {
     "espectro": espectro,
     "modal": modal,
     "cortante": cortante,
+    "torsion": torsion,
     "derivas": derivas,
     "deformadas": deformadas,
     "muros": muros_losas,

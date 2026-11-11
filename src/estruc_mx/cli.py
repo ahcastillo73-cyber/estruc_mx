@@ -7,7 +7,7 @@
     estruc-mx modal ejemplos/marco_3niveles.json --modos 12
     estruc-mx espectral ejemplos/marco_3niveles.json --direccion X --metodo CQC
     estruc-mx gui ejemplos/marco_3niveles.json
-    estruc-mx reporte ejemplos/marco_3niveles.json -o reporte.pdf --sistema marco_ductil_concreto
+    estruc-mx reporte ejemplos/marco_3niveles.json -o reporte.pdf --sistema marco_ductil_concreto --ts 1.2
 """
 
 from __future__ import annotations
@@ -72,6 +72,17 @@ def main(argv: list[str] | None = None) -> int:
     re.add_argument("--deriva-limite", type=float, help="Distorsión límite explícita")
     re.add_argument("--factor-deriva", type=float,
                     help="Factor Q·R para comparar derivas; por defecto la reducción del espectro")
+    re.add_argument("--norma", choices=["NTC", "CFE"], default="NTC", help="Criterios de la revisión sísmica")
+    re.add_argument("--ts", type=float, help="Periodo dominante del terreno Ts (s), para el cortante mínimo NTC")
+    re.add_argument("--sobrerresistencia", type=float, default=1.0, help="R que divide a a_min (NTC)")
+    re.add_argument("--cortante-minimo", type=float, help="Coeficiente de cortante basal mínimo explícito (V/W)")
+    re.add_argument("--escalar-desplazamientos", action="store_true",
+                    help="Escalar también los desplazamientos por el cortante mínimo")
+    re.add_argument("--sin-torsion", action="store_true", help="No considerar la torsión accidental")
+    re.add_argument("--excentricidad", type=float, help="Excentricidad accidental fija, fracción de b")
+    re.add_argument("--divisor-servicio", type=float,
+                    help="Sin espectro de servicio en el modelo: distorsión de colapso / este valor")
+    re.add_argument("--limite-servicio", type=float, default=0.002, help="Distorsión límite de servicio")
     re.add_argument("--secciones", help="Lista separada por comas; por defecto todas")
     re.add_argument("--autor", default="")
     re.add_argument("--sistemas", action="store_true", help="Lista los sistemas estructurales y sale")
@@ -144,6 +155,10 @@ def main(argv: list[str] | None = None) -> int:
         op = Opciones(
             motor=args.motor, n_modos=args.modos, metodo=args.metodo, sistema=args.sistema,
             deriva_limite=args.deriva_limite, factor_deriva=args.factor_deriva, autor=args.autor,
+            norma=args.norma, periodo_sitio=args.ts, sobrerresistencia=args.sobrerresistencia,
+            cortante_minimo=args.cortante_minimo, escalar_desplazamientos=args.escalar_desplazamientos,
+            torsion=not args.sin_torsion, excentricidad=args.excentricidad,
+            divisor_servicio=args.divisor_servicio, limite_servicio=args.limite_servicio,
         )
         secciones = [x.strip() for x in args.secciones.split(",")] if args.secciones else None
         ruta = generar(modelo, args.salida, op, secciones)

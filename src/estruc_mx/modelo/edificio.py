@@ -294,6 +294,9 @@ class Edificio(BaseModel):
     peso_propio_en_masa: bool = True
     masas_nodales: list[MasaNodal] = []
     espectro: Espectro | None = None
+    # Espectro para la revisión de servicio (limitación de daños), elástico y para la intensidad
+    # frecuente según las NTC 2023; opcional
+    espectro_servicio: Espectro | None = None
     # Tamaño máximo de los elementos de cáscara en que se dividen muros y losas
     tamano_malla: float = Field(1.0, gt=0, description="m")
     # Solo para dibujar en la ventana; no entra en el análisis

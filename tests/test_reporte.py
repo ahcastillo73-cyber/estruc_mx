@@ -38,9 +38,24 @@ def test_derivas_comparan_contra_limite(datos):
     tabla = next(b for b in doc.bloques if isinstance(b, Tabla))
     assert tabla.encabezados[-1] == "Cumple"
     assert len(tabla.filas) == 3  # tres niveles
-    # La distorsión de la tabla es la del análisis espectral por el factor (1 con espectro elástico)
-    x = datos.espectral["X"].derivas[0].deriva
+    # La distorsión de la tabla es la de la revisión (con torsión y 100/30) por el factor (1 con
+    # espectro elástico), mayor que la del análisis espectral solo
+    x = datos.revision.derivas["X"][0].deriva
     assert float(tabla.filas[0][1]) == pytest.approx(x, abs=1e-5)
+    assert x > datos.espectral["X"].derivas[0].deriva
+
+
+def test_revision_sismica_en_el_reporte(datos):
+    doc = construir(datos, ["cortante", "torsion", "derivas"])
+    titulos = [t.titulo for t in doc.bloques if isinstance(t, Tabla)]
+    assert "Revisión del cortante basal mínimo" in titulos
+    assert any(t.startswith("Torsión accidental") for t in titulos)
+    # Sin espectro de servicio ni divisor, la revisión de servicio queda pendiente y se avisa
+    assert "Distorsiones de entrepiso de servicio" not in titulos
+    d2 = preparar(construir_marco(), Opciones(n_modos=6, sistema="marco_ductil_concreto", divisor_servicio=5.5,
+                                              periodo_sitio=1.2))
+    titulos = [t.titulo for t in construir(d2, ["derivas"]).bloques if isinstance(t, Tabla)]
+    assert "Distorsiones de entrepiso de servicio" in titulos
 
 
 def test_seccion_desconocida(datos):

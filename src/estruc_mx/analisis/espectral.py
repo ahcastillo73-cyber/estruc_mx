@@ -18,6 +18,7 @@ from ..modelo.malla import Malla, discretizar
 from ..modelo.masas import G
 from ..motores import Modos
 from .areas import COMPONENTES_MURO, bases_muros, fuerzas_muro
+from .pisos import asignar, niveles
 
 _GDL = {"X": 0, "Y": 1, "Z": 2}
 
@@ -77,6 +78,18 @@ class Deriva:
 
 
 @dataclass
+class DerivaElemento:
+    """Distorsión de un tramo vertical (columna o borde de muro), en X y en Y."""
+
+    elemento: str
+    abajo: str  # nodos
+    arriba: str
+    nivel: float  # elevación del extremo superior, m
+    altura: float
+    componentes: dict[str, float]  # "X", "Y" -> distorsión combinada (positiva)
+
+
+@dataclass
 class RespuestaEspectral:
     direccion: str
     metodo: str
@@ -88,6 +101,10 @@ class RespuestaEspectral:
     derivas: list[Deriva]  # la máxima por nivel, de abajo hacia arriba
     # muro -> P, V, M, Vfp, Mfp, T combinados (valores positivos), en la base de cada muro
     fuerzas_muros: dict[str, dict[str, float]] = field(default_factory=dict)
+    # Cortante por entrepiso: (elevación del nivel de arriba, V en kN), de abajo hacia arriba
+    cortantes_entrepiso: list[tuple[float, float]] = field(default_factory=list)
+    # Distorsión de cada tramo vertical en ambas direcciones (para torsión y 100/30)
+    derivas_elementos: list[DerivaElemento] = field(default_factory=list)
 
 
 def espectral(
@@ -121,14 +138,33 @@ def espectral(
 
     g = _GDL[direccion]
     por_nivel: dict[float, Deriva] = {}
+    por_elemento: list[DerivaElemento] = []
     indice = {n: k for k, n in enumerate(nodos)}
     for elemento, abajo, arriba in elementos_verticales(modelo):
         h = arriba.z - abajo.z
-        rel = (u_modal[:, indice[arriba.id], g] - u_modal[:, indice[abajo.id], g]) / h
-        valor = float(_combinar(rel[:, None], rho)[0])
+        comp = {}
+        for d, k in (("X", 0), ("Y", 1)):
+            rel = (u_modal[:, indice[arriba.id], k] - u_modal[:, indice[abajo.id], k]) / h
+            comp[d] = float(_combinar(rel[:, None], rho)[0])
         nivel = round(arriba.z, 6)
+        por_elemento.append(DerivaElemento(elemento, abajo.id, arriba.id, nivel, h, comp))
+        valor = comp[direccion]
         if nivel not in por_nivel or valor > por_nivel[nivel].deriva:
             por_nivel[nivel] = Deriva(nivel=nivel, deriva=valor, barra=elemento)
+
+    # Fuerzas de inercia modales m·Γ·φ·Sa·g en la dirección del sismo, acumuladas por entrepiso
+    masas = masas_nodales(modelo, malla)
+    zs = niveles(modelo)
+    nivel_de = asignar(malla, zs)
+    cortantes: list[tuple[float, float]] = []
+    if zs:
+        f_modal = np.zeros((len(validos), len(zs)))
+        for n, k in nivel_de.items():
+            if n in masas:
+                f_modal[:, k] += masas[n] * phi[:, indice[n], g] * amp * (2 * math.pi / np.array(T)) ** 2
+        v_modal = np.cumsum(f_modal[:, ::-1], axis=1)[:, ::-1]  # cortante de cada entrepiso
+        v = _combinar(v_modal, rho)
+        cortantes = [(z, float(x)) for z, x in zip(zs, v)]
 
     fuerzas_muros: dict[str, dict[str, float]] = {}
     if modos.fuerzas_elementos:
@@ -150,6 +186,8 @@ def espectral(
         cortante_basal_modal=[float(v) for v in V_modal],
         derivas=[por_nivel[z] for z in sorted(por_nivel)],
         fuerzas_muros=fuerzas_muros,
+        cortantes_entrepiso=cortantes,
+        derivas_elementos=por_elemento,
     )
 
 
