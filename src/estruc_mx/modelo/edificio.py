@@ -171,6 +171,16 @@ class Combinacion(BaseModel):
     factores: dict[str, float]
 
 
+class Diafragma(BaseModel):
+    """Diafragma rígido horizontal a la elevación `z` (un piso con losa que no se deforma en su
+    plano). Todos los nodos de la malla de análisis a esa altura se mueven juntos en X, Y y en
+    el giro RZ, con un nodo maestro en el centro de masa (ver modelo/diafragmas.py). La flexión
+    de la losa fuera de su plano no cambia."""
+
+    nombre: str
+    z: float = Field(description="Elevación, m")
+
+
 class EjeRejilla(BaseModel):
     nombre: str
     coord: float = Field(description="Coordenada del eje, m")
@@ -294,6 +304,7 @@ class Edificio(BaseModel):
     peso_propio_en_masa: bool = True
     masas_nodales: list[MasaNodal] = []
     espectro: Espectro | None = None
+    diafragmas: list[Diafragma] = []
     # Tamaño máximo de los elementos de cáscara en que se dividen muros y losas
     tamano_malla: float = Field(1.0, gt=0, description="m")
     # Solo para dibujar en la ventana; no entra en el análisis
@@ -330,6 +341,7 @@ class Edificio(BaseModel):
             ("áreas", self.areas, "id"),
             ("patrones", self.patrones, "nombre"),
             ("combinaciones", self.combinaciones, "nombre"),
+            ("diafragmas", self.diafragmas, "nombre"),
         ]:
             vistos: set[str] = set()
             for it in items:
@@ -401,6 +413,12 @@ class Edificio(BaseModel):
             for p in co.factores:
                 if p not in pats:
                     errores.append(f"combinación '{co.nombre}': patrón '{p}' no existe")
+
+        cotas: list[float] = []
+        for d in self.diafragmas:
+            if any(math.isclose(d.z, z, abs_tol=1e-6) for z in cotas):
+                errores.append(f"diafragma '{d.nombre}': ya hay otro diafragma a z = {d.z:g}")
+            cotas.append(d.z)
 
         if errores:
             raise ValueError("Modelo inválido:\n- " + "\n- ".join(errores))

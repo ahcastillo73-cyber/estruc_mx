@@ -8,6 +8,7 @@ El script imprime los resultados en JSON, en ejes globales del modelo.
 
 Se analiza la malla de `modelo/malla.py`, la misma que usa PyNite: muros y losas como elementos
 ShellMITC4 con sección ElasticMembranePlateSection, y las barras que pasan por la malla, en tramos.
+Los diafragmas rígidos usan `rigidDiaphragm` con el nodo maestro en el centro de masa.
 """
 
 from __future__ import annotations
@@ -35,6 +36,8 @@ def generar_script(modelo: Edificio) -> str:
     """Devuelve el script OpenSeesPy (texto) que analiza todas las combinaciones."""
     malla = discretizar(modelo)
     tag_nodo = {nid: k for k, nid in enumerate(malla.nodos, start=1)}
+    for d in malla.diafragmas:
+        tag_nodo[d.maestro] = len(tag_nodo) + 1
     tag_seg = {sg.id: k for k, sg in enumerate(malla.segmentos, start=1)}
     tag_elem = {e.id: k for k, e in enumerate(malla.elementos, start=len(tag_seg) + 1)}
     tag_sec_area = {s.nombre: k for k, s in enumerate(modelo.secciones_area, start=1)}
@@ -67,6 +70,13 @@ def generar_script(modelo: Edificio) -> str:
     for nid, r in malla.apoyos.items():
         fijos = ", ".join("1" if x else "0" for x in r)
         w(f"    ops.fix({tag_nodo[nid]}, {fijos})")
+    for d in malla.diafragmas:
+        c = d.centro
+        w(f"    # Diafragma rígido {d.nombre}: maestro en el centro de masa, libres UX, UY y RZ")
+        w(f"    ops.node({tag_nodo[d.maestro]}, {_num(c[0])}, {_num(c[1])}, {_num(c[2])})  # {d.maestro}")
+        w(f"    ops.fix({tag_nodo[d.maestro]}, 0, 0, 1, 1, 1, 0)")
+        esclavos = ", ".join(str(tag_nodo[n]) for n in d.esclavos)
+        w(f"    ops.rigidDiaphragm(3, {tag_nodo[d.maestro]}, {esclavos})")
     for sg in malla.segmentos:
         b = modelo.barra(sg.barra)
         s = modelo.seccion(b.seccion)

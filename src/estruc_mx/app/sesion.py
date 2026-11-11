@@ -132,6 +132,25 @@ class Sesion:
         except ValueError as e:
             t.filas.append(["Masa", f"error: {e}"])
         t.filas.append(["Espectro", m.espectro.nombre if m.espectro else "sin definir"])
+        if m.diafragmas:
+            t.filas.append(["Diafragmas rígidos", ", ".join(d.nombre for d in m.diafragmas)])
+        return t
+
+    def tabla_diafragmas(self) -> Tabla:
+        """Centro de masa de cada diafragma (el desplazamiento del centro sale en Desplazamientos)."""
+        from ..modelo.malla import discretizar
+
+        self._exigir_modelo()
+        malla = discretizar(self.modelo)
+        t = Tabla("Diafragmas rígidos: centro de masa", ["Diafragma", "Z (m)", "Masa (t)", "X CM (m)", "Y CM (m)", "Nodos"])
+        for d in malla.diafragmas:
+            t.filas.append([
+                d.nombre, d.z, round(d.masa, 3), round(float(d.centro[0]), 3), round(float(d.centro[1]), 3), len(d.esclavos),
+            ])
+        if not malla.diafragmas:
+            t.titulo += " (ninguno aplicado)"
+        for aviso in (a for a in malla.avisos if a.startswith("Diafragma")):
+            t.titulo += f". {aviso}"
         return t
 
     def tabla_desplazamientos(self, combinacion: str) -> Tabla:
@@ -142,6 +161,13 @@ class Sesion:
         # Solo los nodos del modelo; los de la malla de muros y losas se ven en la deformada
         for n in self.modelo.nodos:
             t.filas.append([n.id, n.x, n.y, n.z, *(round(v * 1000, 3) for v in tabla[n.id][:3])])
+        # Centros de masa de los diafragmas (nodos maestros)
+        from ..modelo.malla import discretizar
+
+        for d in discretizar(self.modelo).diafragmas:
+            if d.maestro in tabla:
+                x, y, z = (round(float(v), 3) for v in d.centro)
+                t.filas.append([d.maestro, x, y, z, *(round(v * 1000, 3) for v in tabla[d.maestro][:3])])
         return t
 
     def tabla_muros(self, combinacion: str) -> Tabla:
