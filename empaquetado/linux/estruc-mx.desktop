@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=estruc-mx
+GenericName=Análisis estructural
+Comment=Análisis de edificios con PyNite y OpenSees (NTC 2023, CFE)
+Exec=estruc-mx %f
+Icon=estruc-mx
+Terminal=false
+Categories=Science;Engineering;
+MimeType=application/json;

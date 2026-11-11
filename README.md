@@ -48,10 +48,29 @@ estruc-mx reporte --sistemas   # sistemas estructurales y su distorsión límite
 python -m pytest
 ```
 
+## Instaladores
+
+La CI genera tres instaladores con Python 3.12, OpenSeesPy, PyNite, el reporte y, cuando está en la rama, la ventana PySide6. No hace falta instalar Python en la otra máquina.
+
+| Sistema | Archivo | Cómo se instala |
+|---|---|---|
+| Linux x86_64 | `estruc-mx-<versión>-x86_64.AppImage` | `chmod +x` y doble clic, o `./estruc-mx-….AppImage` |
+| macOS Apple Silicon | `estruc-mx-<versión>-macos-arm64.dmg` | Arrastrar `estruc-mx.app` a Aplicaciones |
+| Windows x64 | `estruc-mx-<versión>-windows-x64-instalador.exe` | Asistente; se instala para el usuario, sin permisos de administrador |
+| Windows x64 | `estruc-mx-<versión>-windows-x64-portatil.zip` | Descomprimir y ejecutar `estruc-mx.exe` |
+
+**Dónde descargarlos.** Al publicar una etiqueta, por ejemplo `git tag v0.1.0 && git push origin v0.1.0`, el flujo *Instaladores* crea un Release con los cuatro archivos. También se puede lanzar a mano en *Actions → Instaladores → Run workflow*; los archivos quedan como artefactos de esa ejecución durante 30 días.
+
+**Uso.** Sin argumentos, o con un archivo `.json`, se abre la ventana (si no está incluida, se muestra la ayuda). Con una orden se comporta como `estruc-mx`: `./estruc-mx-….AppImage reporte modelo.json -o reporte.pdf`. En Windows la línea de comandos es `estruc-mx-cli.exe` (el instalador ofrece añadirlo al PATH); en macOS, `/Applications/estruc-mx.app/Contents/MacOS/estruc-mx`.
+
+**Sin firma de código.** Los instaladores no están firmados. En macOS, la primera vez: clic derecho sobre la app → Abrir, o `xattr -dr com.apple.quarantine /Applications/estruc-mx.app`. En Windows, SmartScreen avisa: «Más información» → «Ejecutar de todas formas».
+
+**Construir en local.** Con Python 3.12: `pip install ".[opensees,visual,reporte,gui]" pyinstaller`, `python empaquetado/iconos.py` y `pyinstaller --noconfirm empaquetado/estruc_mx.spec`; el resultado queda en `dist/`. Los scripts de `empaquetado/linux`, `macos` y `windows` hacen el último paso de cada sistema.
+
 ## Siguientes pasos de la fase 0
 
 1. ~~Análisis modal y espectral en ambos motores.~~ Hecho; falta la forma paramétrica del espectro CFE.
 2. Muros como placas en PyNite.
 3. ~~Ventana PySide6 con la vista VTK integrada.~~ Hecho (primera versión, sin edición del modelo).
 4. ~~Reporte mínimo.~~ Hecho en PDF y Word; falta la revisión de limitación de daños (servicio) y el cortante mínimo de las NTC.
-5. Instaladores automáticos para Linux (AppImage), macOS (.dmg) y Windows (.exe).
+5. ~~Instaladores automáticos para Linux (AppImage), macOS (.dmg) y Windows (.exe).~~ Hecho; sin firma de código.

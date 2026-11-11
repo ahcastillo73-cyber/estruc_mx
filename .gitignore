@@ -10,3 +10,8 @@ dist/
 htmlcov/
 *.spec.bak
 salidas/
+instaladores/
+empaquetado/linux/estruc-mx.png
+empaquetado/windows/estruc-mx.ico
+empaquetado/macos/estruc-mx.icns
+build.log
