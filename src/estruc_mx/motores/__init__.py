@@ -1,3 +1,3 @@
-from .resultados import Resultados
+from .resultados import Modos, Resultados
 
-__all__ = ["Resultados"]
+__all__ = ["Modos", "Resultados"]

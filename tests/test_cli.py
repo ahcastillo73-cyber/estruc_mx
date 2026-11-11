@@ -15,3 +15,10 @@ def test_exporta_script(tmp_path):
     destino = tmp_path / "m.py"
     assert main(["script", EJEMPLO, "-o", str(destino)]) == 0
     assert "ops.element('elasticBeamColumn'" in destino.read_text(encoding="utf-8")
+
+
+def test_modal_y_espectral(capsys):
+    assert main(["modal", EJEMPLO, "--modos", "6"]) == 0
+    assert "acum X" in capsys.readouterr().out
+    assert main(["espectral", EJEMPLO, "--direccion", "Y", "--modos", "6"]) == 0
+    assert "Cortante basal" in capsys.readouterr().out

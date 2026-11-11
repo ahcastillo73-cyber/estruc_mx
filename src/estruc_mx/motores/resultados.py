@@ -24,3 +24,13 @@ class Resultados:
         tabla = self.desplazamientos[combinacion]
         nodo = max(tabla, key=lambda n: abs(tabla[n][gdl]))
         return nodo, tabla[nodo][gdl]
+
+
+@dataclass
+class Modos:
+    """Periodos y formas modales; las formas tienen normalización arbitraria."""
+
+    motor: str
+    periodos: list[float] = field(default_factory=list)
+    # por modo: nodo -> [UX, UY, UZ, RX, RY, RZ]
+    formas: list[dict[str, list[float]]] = field(default_factory=list)

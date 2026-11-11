@@ -15,9 +15,9 @@ import sys
 import tempfile
 from pathlib import Path
 
-from ..modelo import Edificio
+from ..modelo import Edificio, masas_nodales
 from .comun import combinaciones_efectivas
-from .resultados import Resultados
+from .resultados import Modos, Resultados
 
 _MARCA = "#RESULTADOS#"
 
@@ -36,10 +36,18 @@ def generar_script(modelo: Edificio) -> str:
     w = L.append
     w(f'"""Modelo "{modelo.nombre}" generado por estruc_mx. Unidades: kN, m. Z vertical."""')
     w("import json")
+    w("import math")
+    w("import sys")
+    w("")
     w("import openseespy.opensees as ops")
     w("")
     w(f"NODOS = {json.dumps(tag_nodo, ensure_ascii=False)}  # id del modelo -> tag OpenSees")
     w(f"APOYOS = {json.dumps([a.nodo for a in modelo.apoyos], ensure_ascii=False)}")
+    try:
+        masas = masas_nodales(modelo)
+    except ValueError:
+        masas = {}
+    w(f"MASAS = {json.dumps({n: round(m, 12) for n, m in masas.items()}, ensure_ascii=False)}  # t, traslacional")
     w("")
     w("")
     w("def construir():")
@@ -100,32 +108,64 @@ def generar_script(modelo: Edificio) -> str:
     w("    return desp, reac")
     w("")
     w("")
+    w("def modal(n_modos):")
+    w("    construir()")
+    w("    for n, m in MASAS.items():")
+    w("        ops.mass(NODOS[n], m, m, m, 0.0, 0.0, 0.0)")
+    w("    try:")
+    w("        lam = ops.eigen(n_modos)")
+    w("    except Exception:")
+    w("        lam = ops.eigen('-fullGenLapack', n_modos)")
+    w("    periodos = [2 * math.pi / math.sqrt(v) for v in lam]")
+    w("    formas = [{n: [ops.nodeEigenvector(t, i, k) for k in range(1, 7)] for n, t in NODOS.items()}")
+    w("              for i in range(1, len(lam) + 1)]")
+    w("    return periodos, formas")
+    w("")
+    w("")
     w(f"COMBINACIONES = {json.dumps({c.nombre: c.factores for c in combos}, ensure_ascii=False)}")
     w("")
     w("if __name__ == '__main__':")
-    w("    salida = {'desplazamientos': {}, 'reacciones': {}}")
-    w("    for nombre, factores in COMBINACIONES.items():")
-    w("        d, r = analizar(factores)")
-    w("        salida['desplazamientos'][nombre] = d")
-    w("        salida['reacciones'][nombre] = r")
+    w("    # Uso: python modelo_opensees.py            -> análisis estático de las combinaciones")
+    w("    #      python modelo_opensees.py modal 12   -> análisis modal con 12 modos")
+    w("    if len(sys.argv) > 1 and sys.argv[1] == 'modal':")
+    w("        T, phi = modal(int(sys.argv[2]) if len(sys.argv) > 2 else 12)")
+    w("        salida = {'periodos': T, 'formas': phi}")
+    w("    else:")
+    w("        salida = {'desplazamientos': {}, 'reacciones': {}}")
+    w("        for nombre, factores in COMBINACIONES.items():")
+    w("            d, r = analizar(factores)")
+    w("            salida['desplazamientos'][nombre] = d")
+    w("            salida['reacciones'][nombre] = r")
     w(f"    print({_MARCA!r} + json.dumps(salida))")
     return "\n".join(L) + "\n"
 
 
-def analizar(modelo: Edificio, carpeta: str | Path | None = None, timeout: float = 600) -> Resultados:
-    """Genera el script, lo ejecuta en un proceso aparte y lee los resultados."""
+def _ejecutar(modelo: Edificio, args: list[str], carpeta, timeout: float) -> dict:
     script = generar_script(modelo)
     with tempfile.TemporaryDirectory() as tmp:
         ruta = Path(carpeta or tmp) / "modelo_opensees.py"
         ruta.parent.mkdir(parents=True, exist_ok=True)
         ruta.write_text(script, encoding="utf-8")
         proc = subprocess.run(
-            [sys.executable, str(ruta)], capture_output=True, text=True, timeout=timeout
+            [sys.executable, str(ruta), *args], capture_output=True, text=True, timeout=timeout
         )
     if proc.returncode != 0:
         raise RuntimeError(f"OpenSees falló:\n{proc.stderr[-4000:]}")
     linea = next((ln for ln in proc.stdout.splitlines() if ln.startswith(_MARCA)), None)
     if linea is None:
         raise RuntimeError(f"OpenSees no devolvió resultados:\n{proc.stdout[-4000:]}")
-    datos = json.loads(linea[len(_MARCA):])
+    return json.loads(linea[len(_MARCA):])
+
+
+def analizar(modelo: Edificio, carpeta: str | Path | None = None, timeout: float = 600) -> Resultados:
+    """Genera el script, lo ejecuta en un proceso aparte y lee los resultados."""
+    datos = _ejecutar(modelo, [], carpeta, timeout)
     return Resultados(motor="opensees", desplazamientos=datos["desplazamientos"], reacciones=datos["reacciones"])
+
+
+def modal(modelo: Edificio, n_modos: int = 12, carpeta: str | Path | None = None, timeout: float = 600) -> Modos:
+    """Análisis modal con las masas nodales de `masas_nodales` (traslacionales)."""
+    if not masas_nodales(modelo):
+        raise ValueError("el modelo no tiene masa: define fuente_masa, peso propio o masas nodales")
+    datos = _ejecutar(modelo, ["modal", str(n_modos)], carpeta, timeout)
+    return Modos(motor="opensees", periodos=datos["periodos"], formas=datos["formas"])
