@@ -123,7 +123,8 @@ jobs:
           fi
           ISCC="/c/Program Files (x86)/Inno Setup 6/ISCC.exe"
           command -v iscc >/dev/null && ISCC=iscc
-          "$ISCC" "/DVersion=${{ steps.version.outputs.valor }}" "/DVersionNum=$ESTRUC_VERSION" empaquetado/windows/instalador.iss
+          # Sin esto, Git Bash convierte "/DVersion=…" en una ruta de Windows
+          MSYS_NO_PATHCONV=1 "$ISCC" "/DVersion=${{ steps.version.outputs.valor }}" "/DVersionNum=$ESTRUC_VERSION" empaquetado/windows/instalador.iss
           # Versión portátil: la misma carpeta en un .zip, sin instalar
           7z a -tzip "instaladores/estruc-mx-${{ steps.version.outputs.valor }}-windows-x64-portatil.zip" ./dist/estruc-mx
 
