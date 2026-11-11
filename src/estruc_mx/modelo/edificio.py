@@ -1,0 +1,253 @@
+"""Modelo de datos del edificio: la fuente única de verdad.
+
+Unidades: kN, m, s. Los esfuerzos y módulos van en kPa (kN/m²).
+Ejes globales: X y Y horizontales, Z vertical hacia arriba (convención tipo ETABS).
+
+Ejes locales de una barra (1, 2, 3 en ETABS; x, y, z aquí):
+- x va del nodo i al nodo j.
+- Barras no verticales: z es horizontal y perpendicular a x; y tiene componente hacia arriba.
+  La flexión mayor (I33) es alrededor de z, así que resiste la gravedad en vigas.
+- Barras verticales que suben: y = -X global, z = -Y global.
+`rotacion` (grados) gira y, z alrededor de x.
+"""
+
+from __future__ import annotations
+
+import math
+from typing import Annotated, Literal, Union
+
+import numpy as np
+from pydantic import BaseModel, Field, model_validator
+
+
+class Material(BaseModel):
+    nombre: str
+    tipo: Literal["concreto", "acero", "mamposteria", "generico"] = "generico"
+    E: float = Field(gt=0, description="Módulo de elasticidad, kPa")
+    nu: float = Field(0.2, ge=0, lt=0.5, description="Relación de Poisson")
+    peso_vol: float = Field(0.0, ge=0, description="Peso volumétrico, kN/m³")
+
+    @property
+    def G(self) -> float:
+        return self.E / (2.0 * (1.0 + self.nu))
+
+
+class _SeccionBase(BaseModel):
+    nombre: str
+    material: str
+
+
+class SeccionRectangular(_SeccionBase):
+    forma: Literal["rectangular"] = "rectangular"
+    b: float = Field(gt=0, description="Ancho, paralelo al eje local z, m")
+    h: float = Field(gt=0, description="Peralte, paralelo al eje local y, m")
+
+    @property
+    def A(self) -> float:
+        return self.b * self.h
+
+    @property
+    def I33(self) -> float:
+        return self.b * self.h**3 / 12.0
+
+    @property
+    def I22(self) -> float:
+        return self.h * self.b**3 / 12.0
+
+    @property
+    def J(self) -> float:
+        a, c = max(self.b, self.h), min(self.b, self.h)
+        return a * c**3 * (1.0 / 3.0 - 0.21 * (c / a) * (1.0 - c**4 / (12.0 * a**4)))
+
+
+class SeccionGeneral(_SeccionBase):
+    forma: Literal["general"] = "general"
+    A: float = Field(gt=0)
+    I33: float = Field(gt=0, description="Inercia mayor, alrededor del eje local z")
+    I22: float = Field(gt=0, description="Inercia menor, alrededor del eje local y")
+    J: float = Field(gt=0)
+
+
+Seccion = Annotated[Union[SeccionRectangular, SeccionGeneral], Field(discriminator="forma")]
+
+
+class Nodo(BaseModel):
+    id: str
+    x: float
+    y: float
+    z: float
+
+    @property
+    def coords(self) -> np.ndarray:
+        return np.array([self.x, self.y, self.z], dtype=float)
+
+
+class Apoyo(BaseModel):
+    nodo: str
+    restricciones: tuple[bool, bool, bool, bool, bool, bool] = Field(
+        (True, True, True, True, True, True),
+        description="UX, UY, UZ, RX, RY, RZ",
+    )
+
+
+class Barra(BaseModel):
+    id: str
+    tipo: Literal["columna", "viga", "contraviento", "barra"] = "barra"
+    i: str
+    j: str
+    seccion: str
+    rotacion: float = 0.0
+
+
+class PatronCarga(BaseModel):
+    nombre: str
+    tipo: Literal["muerta", "viva", "sismo", "viento", "otra"] = "otra"
+
+
+class CargaNodal(BaseModel):
+    patron: str
+    nodo: str
+    fuerzas: tuple[float, float, float, float, float, float] = Field(
+        description="FX, FY, FZ (kN), MX, MY, MZ (kN·m), en ejes globales"
+    )
+
+
+class CargaDistribuida(BaseModel):
+    """Carga uniforme por metro de barra, en dirección global."""
+
+    patron: str
+    barra: str
+    direccion: Literal["X", "Y", "Z"]
+    w: float = Field(description="kN/m; negativo en Z es gravedad")
+
+
+class Combinacion(BaseModel):
+    nombre: str
+    factores: dict[str, float]
+
+
+class Edificio(BaseModel):
+    nombre: str
+    materiales: list[Material] = []
+    secciones: list[Seccion] = []
+    nodos: list[Nodo] = []
+    barras: list[Barra] = []
+    apoyos: list[Apoyo] = []
+    patrones: list[PatronCarga] = []
+    cargas_nodales: list[CargaNodal] = []
+    cargas_distribuidas: list[CargaDistribuida] = []
+    combinaciones: list[Combinacion] = []
+
+    # --- búsquedas ---------------------------------------------------------
+    def material(self, nombre: str) -> Material:
+        return _buscar(self.materiales, "nombre", nombre, "material")
+
+    def seccion(self, nombre: str) -> SeccionRectangular | SeccionGeneral:
+        return _buscar(self.secciones, "nombre", nombre, "sección")
+
+    def nodo(self, id_: str) -> Nodo:
+        return _buscar(self.nodos, "id", id_, "nodo")
+
+    def barra(self, id_: str) -> Barra:
+        return _buscar(self.barras, "id", id_, "barra")
+
+    # --- validación de referencias ----------------------------------------
+    @model_validator(mode="after")
+    def _validar_referencias(self) -> "Edificio":
+        errores: list[str] = []
+        for nombre, items, clave in [
+            ("materiales", self.materiales, "nombre"),
+            ("secciones", self.secciones, "nombre"),
+            ("nodos", self.nodos, "id"),
+            ("barras", self.barras, "id"),
+            ("patrones", self.patrones, "nombre"),
+            ("combinaciones", self.combinaciones, "nombre"),
+        ]:
+            vistos: set[str] = set()
+            for it in items:
+                k = getattr(it, clave)
+                if k in vistos:
+                    errores.append(f"{nombre}: '{k}' repetido")
+                vistos.add(k)
+
+        mats = {m.nombre for m in self.materiales}
+        secs = {s.nombre for s in self.secciones}
+        nods = {n.id for n in self.nodos}
+        bars = {b.id for b in self.barras}
+        pats = {p.nombre for p in self.patrones}
+
+        for s in self.secciones:
+            if s.material not in mats:
+                errores.append(f"sección '{s.nombre}': material '{s.material}' no existe")
+        for b in self.barras:
+            for n in (b.i, b.j):
+                if n not in nods:
+                    errores.append(f"barra '{b.id}': nodo '{n}' no existe")
+            if b.i == b.j:
+                errores.append(f"barra '{b.id}': nodo inicial y final iguales")
+            if b.seccion not in secs:
+                errores.append(f"barra '{b.id}': sección '{b.seccion}' no existe")
+        for a in self.apoyos:
+            if a.nodo not in nods:
+                errores.append(f"apoyo: nodo '{a.nodo}' no existe")
+        for c in self.cargas_nodales:
+            if c.nodo not in nods:
+                errores.append(f"carga nodal: nodo '{c.nodo}' no existe")
+            if c.patron not in pats:
+                errores.append(f"carga nodal: patrón '{c.patron}' no existe")
+        for c in self.cargas_distribuidas:
+            if c.barra not in bars:
+                errores.append(f"carga distribuida: barra '{c.barra}' no existe")
+            if c.patron not in pats:
+                errores.append(f"carga distribuida: patrón '{c.patron}' no existe")
+        for co in self.combinaciones:
+            for p in co.factores:
+                if p not in pats:
+                    errores.append(f"combinación '{co.nombre}': patrón '{p}' no existe")
+
+        if errores:
+            raise ValueError("Modelo inválido:\n- " + "\n- ".join(errores))
+        return self
+
+    # --- geometría ----------------------------------------------------------
+    def ejes_locales(self, barra: Barra) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Vectores unitarios (x, y, z) locales de una barra en ejes globales."""
+        pi, pj = self.nodo(barra.i).coords, self.nodo(barra.j).coords
+        d = pj - pi
+        L = float(np.linalg.norm(d))
+        if L == 0:
+            raise ValueError(f"barra '{barra.id}' de longitud nula")
+        x = d / L
+        if math.isclose(d[0], 0.0, abs_tol=1e-9) and math.isclose(d[1], 0.0, abs_tol=1e-9):
+            if d[2] > 0:
+                y, z = np.array([-1.0, 0.0, 0.0]), np.array([0.0, -1.0, 0.0])
+            else:
+                y, z = np.array([1.0, 0.0, 0.0]), np.array([0.0, -1.0, 0.0])
+        else:
+            z = np.cross(x, [0.0, 0.0, 1.0])
+            z /= np.linalg.norm(z)
+            y = np.cross(z, x)
+        if barra.rotacion:
+            a = math.radians(barra.rotacion)
+            y, z = math.cos(a) * y + math.sin(a) * z, -math.sin(a) * y + math.cos(a) * z
+        return x, y, z
+
+    def longitud(self, barra: Barra) -> float:
+        return float(np.linalg.norm(self.nodo(barra.j).coords - self.nodo(barra.i).coords))
+
+    # --- archivos -----------------------------------------------------------
+    @classmethod
+    def cargar(cls, ruta: str) -> "Edificio":
+        with open(ruta, encoding="utf-8") as f:
+            return cls.model_validate_json(f.read())
+
+    def guardar(self, ruta: str) -> None:
+        with open(ruta, "w", encoding="utf-8") as f:
+            f.write(self.model_dump_json(indent=2))
+
+
+def _buscar(items, clave, valor, que):
+    for it in items:
+        if getattr(it, clave) == valor:
+            return it
+    raise KeyError(f"{que} '{valor}' no existe")
