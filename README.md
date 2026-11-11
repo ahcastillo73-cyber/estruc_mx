@@ -12,6 +12,10 @@ Estado: **fase 0, prueba de concepto**. El plan completo está en el documento d
 - **Vista 3D** (`visual/vista3d.py`): modelo y deformada con PyVista/VTK.
 - **Pruebas**: soluciones exactas, equilibrio y comparación PyNite contra OpenSees en un marco 3D de 3 niveles, con columnas giradas 0°, 30° y 90°. Ambos motores coinciden con tolerancia relativa de 1e-4.
 
+## Requisitos
+
+Python 3.12 o posterior: OpenSeesPy 3.8, la primera versión con binarios para Windows, Linux y macOS con chip M, no se publica para versiones anteriores.
+
 ## Convenciones
 
 - Unidades: kN, m, kPa.

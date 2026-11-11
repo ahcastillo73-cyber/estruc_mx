@@ -7,7 +7,7 @@ name = "estruc-mx"
 version = "0.1.0"
 description = "Análisis estructural de edificios con PyNite y OpenSees, basado en NTC 2023 y CFE"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "numpy>=1.26",
     "pydantic>=2.6",
@@ -15,7 +15,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-opensees = ["openseespy>=3.7"]
+# 3.8 es la primera con binarios para Windows, Linux y macOS arm64; exige Python 3.12+
+opensees = ["openseespy>=3.8"]
 visual = ["pyvista>=0.44"]
 dev = ["pytest>=8"]
 
