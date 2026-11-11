@@ -7,7 +7,7 @@ import re
 from dataclasses import dataclass, field
 from typing import get_args
 
-from ..modelo import Combinacion, Edificio, Material, PatronCarga, SeccionGeneral, SeccionRectangular
+from ..modelo import Combinacion, Edificio, Material, PatronCarga, SeccionArea, SeccionGeneral, SeccionRectangular
 
 
 @dataclass
@@ -30,8 +30,14 @@ def columnas(coleccion: str, modelo: Edificio) -> list[Columna]:
             Columna("Material", [m.nombre for m in modelo.materiales]),
             Columna("b (m)"), Columna("h (m)"), Columna("A (m²)"), Columna("I33 (m⁴)"), Columna("I22 (m⁴)"), Columna("J (m⁴)"),
         ]
+    if coleccion == "secciones_area":
+        return [
+            Columna("Nombre"), Columna("Tipo", _opciones(SeccionArea, "tipo")),
+            Columna("Material", [m.nombre for m in modelo.materiales]), Columna("Espesor (m)"),
+            Columna("Mod. rigidez"),
+        ]
     if coleccion == "patrones":
-        return [Columna("Nombre"), Columna("Tipo", _opciones(PatronCarga, "tipo"))]
+        return [Columna("Nombre"), Columna("Tipo", _opciones(PatronCarga, "tipo")), Columna("Peso propio ×")]
     if coleccion == "combinaciones":
         return [Columna("Nombre"), Columna("Factores (p. ej. 1.3*CM + 1.5*CV)")]
     raise ValueError(f"colección desconocida: {coleccion}")
@@ -53,8 +59,10 @@ def filas(coleccion: str, modelo: Edificio) -> list[list[str]]:
             else:
                 out.append([s.nombre, s.forma, s.material, "", "", _num(s.A), _num(s.I33), _num(s.I22), _num(s.J)])
         return out
+    if coleccion == "secciones_area":
+        return [[s.nombre, s.tipo, s.material, _num(s.espesor), _num(s.mod_rigidez)] for s in modelo.secciones_area]
     if coleccion == "patrones":
-        return [[p.nombre, p.tipo] for p in modelo.patrones]
+        return [[p.nombre, p.tipo, _num(p.peso_propio)] for p in modelo.patrones]
     if coleccion == "combinaciones":
         return [[c.nombre, formatear_factores(c.factores)] for c in modelo.combinaciones]
     raise ValueError(f"colección desconocida: {coleccion}")
@@ -75,8 +83,11 @@ def objetos(coleccion: str, filas_: list[list[str]]) -> list:
                     out.append(SeccionRectangular(nombre=f[0], material=f[2], b=_float(f[3]), h=_float(f[4])))
                 else:
                     out.append(SeccionGeneral(nombre=f[0], material=f[2], A=_float(f[5]), I33=_float(f[6]), I22=_float(f[7]), J=_float(f[8])))
+            elif coleccion == "secciones_area":
+                out.append(SeccionArea(nombre=f[0], tipo=f[1], material=f[2], espesor=_float(f[3]), mod_rigidez=_float(f[4] or "1")))
             elif coleccion == "patrones":
-                out.append(PatronCarga(nombre=f[0], tipo=f[1]))
+                pp = f[2] if len(f) > 2 and f[2] else "0"
+                out.append(PatronCarga(nombre=f[0], tipo=f[1], peso_propio=_float(pp)))
             elif coleccion == "combinaciones":
                 out.append(Combinacion(nombre=f[0], factores=leer_factores(f[1])))
             else:

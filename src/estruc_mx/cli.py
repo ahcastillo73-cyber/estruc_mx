@@ -1,6 +1,7 @@
 """Línea de comandos de la prueba de concepto.
 
     estruc-mx analizar ejemplos/marco_3niveles.json --motor pynite
+    estruc-mx analizar ejemplos/casa_mamposteria.json --motor opensees
     estruc-mx script ejemplos/marco_3niveles.json -o modelo_opensees.py
     estruc-mx ver ejemplos/marco_3niveles.json --combinacion "1.1CM+SX"
     estruc-mx modal ejemplos/marco_3niveles.json --modos 12
@@ -92,7 +93,11 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.orden == "analizar":
         r = _analizar(modelo, args.motor)
-        print(f"{modelo.nombre}: {len(modelo.nodos)} nodos, {len(modelo.barras)} barras, motor {r.motor}")
+        areas = ""
+        if modelo.areas:
+            muros = sum(a.tipo == "muro" for a in modelo.areas)
+            areas = f", {muros} muros, {len(modelo.areas) - muros} losas"
+        print(f"{modelo.nombre}: {len(modelo.nodos)} nodos, {len(modelo.barras)} barras{areas}, motor {r.motor}")
         for combo in r.combinaciones:
             partes = []
             for gdl, eje in enumerate("XYZ"):
@@ -130,7 +135,7 @@ def main(argv: list[str] | None = None) -> int:
             r = espectral(modelo, modos, args.direccion, args.metodo)
             print(f"{modelo.nombre}: espectral {r.direccion}, {r.metodo}, motor {modos.motor}")
             print(f"  Cortante basal: {r.cortante_basal:.1f} kN")
-            print("  Nivel (m)   Deriva    Columna")
+            print("  Nivel (m)   Deriva    Columna o muro")
             for d in r.derivas:
                 print(f"  {d.nivel:8.2f}  {d.deriva:8.5f}  {d.barra}")
     elif args.orden == "reporte":

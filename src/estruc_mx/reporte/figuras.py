@@ -18,6 +18,7 @@ GRIS = "#9a9a9a"
 AZUL = "#1f5fa8"
 ROJO = "#c0392b"
 NARANJA = "#d9822b"
+COLORES_AREA = {"muro": "#d8a26b", "losa": "#8fb8de"}
 
 
 def _png(fig: Figure) -> bytes:
@@ -53,20 +54,34 @@ def deformada(
     Devuelve el PNG y la escala usada."""
     fig = Figure(figsize=(6.0, 5.0))
     ax = fig.add_subplot(projection="3d")
+    from mpl_toolkits.mplot3d.art3d import Line3DCollection, Poly3DCollection
+
     pos = {n.id: n.coords for n in modelo.nodos}
     esc = 0.0
     if desplazamientos:
         esc = escala if escala is not None else escala_deformada(modelo, desplazamientos)
     colores = {"columna": AZUL, "viga": "#2e7d32", "contraviento": NARANJA}
-    for b in modelo.barras:
-        pi, pj = pos[b.i], pos[b.j]
-        if desplazamientos:
-            ax.plot(*zip(pi, pj), color=GRIS, lw=0.8, alpha=0.6)
-            ui = np.array(desplazamientos.get(b.i, [0.0] * 6)[:3])
-            uj = np.array(desplazamientos.get(b.j, [0.0] * 6)[:3])
-            ax.plot(*zip(pi + esc * ui, pj + esc * uj), color=ROJO, lw=1.6)
-        else:
-            ax.plot(*zip(pi, pj), color=colores.get(b.tipo, "#555555"), lw=1.4)
+    if modelo.areas:
+        caras = [[pos[n] for n in a.nodos] for a in modelo.areas]
+        relleno = [COLORES_AREA[a.tipo] for a in modelo.areas]
+        ax.add_collection3d(Poly3DCollection(
+            caras, facecolors=relleno, edgecolors="#8a7a65", linewidths=0.5, alpha=0.12 if desplazamientos else 0.35,
+        ))
+    if desplazamientos:
+        from ..modelo.malla import discretizar
+
+        malla = discretizar(modelo)
+        p = {n: c + esc * np.asarray(desplazamientos.get(n, [0.0] * 6)[:3]) for n, c in malla.nodos.items()}
+        ax.add_collection3d(Line3DCollection([[malla.nodos[s.i], malla.nodos[s.j]] for s in malla.segmentos], colors=GRIS, linewidths=0.8, alpha=0.6))
+        ax.add_collection3d(Line3DCollection([[p[s.i], p[s.j]] for s in malla.segmentos], colors=ROJO, linewidths=1.6))
+        if malla.elementos:
+            ax.add_collection3d(Line3DCollection(
+                [[p[e.nodos[k]], p[e.nodos[(k + 1) % 4]]] for e in malla.elementos for k in range(4)],
+                colors=ROJO, linewidths=0.3, alpha=0.45,
+            ))
+    else:
+        for b in modelo.barras:
+            ax.plot(*zip(pos[b.i], pos[b.j]), color=colores.get(b.tipo, "#555555"), lw=1.4)
     apoyos = np.array([pos[a.nodo] for a in modelo.apoyos]) if modelo.apoyos else np.empty((0, 3))
     if len(apoyos):
         ax.scatter(apoyos[:, 0], apoyos[:, 1], apoyos[:, 2], marker="s", s=14, color="black")

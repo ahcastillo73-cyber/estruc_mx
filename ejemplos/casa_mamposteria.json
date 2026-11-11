@@ -1,0 +1,1153 @@
+{
+  "nombre": "Casa de mampostería confinada",
+  "materiales": [
+    {
+      "nombre": "Concreto f'c 250",
+      "tipo": "concreto",
+      "E": 22000000.0,
+      "nu": 0.2,
+      "peso_vol": 24.0
+    },
+    {
+      "nombre": "Tabique rojo",
+      "tipo": "mamposteria",
+      "E": 880000.0,
+      "nu": 0.25,
+      "peso_vol": 15.0
+    }
+  ],
+  "secciones": [
+    {
+      "nombre": "C40x40",
+      "material": "Concreto f'c 250",
+      "forma": "rectangular",
+      "b": 0.4,
+      "h": 0.4
+    },
+    {
+      "nombre": "V25x50",
+      "material": "Concreto f'c 250",
+      "forma": "rectangular",
+      "b": 0.25,
+      "h": 0.5
+    },
+    {
+      "nombre": "Castillo 15x15",
+      "material": "Concreto f'c 250",
+      "forma": "rectangular",
+      "b": 0.15,
+      "h": 0.15
+    },
+    {
+      "nombre": "Dala 15x20",
+      "material": "Concreto f'c 250",
+      "forma": "rectangular",
+      "b": 0.15,
+      "h": 0.2
+    }
+  ],
+  "secciones_area": [
+    {
+      "nombre": "Muro concreto 15",
+      "material": "Concreto f'c 250",
+      "tipo": "muro",
+      "espesor": 0.15,
+      "mod_rigidez": 1.0
+    },
+    {
+      "nombre": "Muro tabique 14",
+      "material": "Tabique rojo",
+      "tipo": "muro",
+      "espesor": 0.14,
+      "mod_rigidez": 1.0
+    },
+    {
+      "nombre": "Losa 10",
+      "material": "Concreto f'c 250",
+      "tipo": "losa",
+      "espesor": 0.1,
+      "mod_rigidez": 1.0
+    }
+  ],
+  "nodos": [
+    {
+      "id": "A1-Base",
+      "x": 0.0,
+      "y": 0.0,
+      "z": 0.0
+    },
+    {
+      "id": "A1-N1",
+      "x": 0.0,
+      "y": 0.0,
+      "z": 2.6
+    },
+    {
+      "id": "B1-Base",
+      "x": 4.0,
+      "y": 0.0,
+      "z": 0.0
+    },
+    {
+      "id": "B1-N1",
+      "x": 4.0,
+      "y": 0.0,
+      "z": 2.6
+    },
+    {
+      "id": "C1-Base",
+      "x": 7.5,
+      "y": 0.0,
+      "z": 0.0
+    },
+    {
+      "id": "C1-N1",
+      "x": 7.5,
+      "y": 0.0,
+      "z": 2.6
+    },
+    {
+      "id": "A2-Base",
+      "x": 0.0,
+      "y": 3.5,
+      "z": 0.0
+    },
+    {
+      "id": "A2-N1",
+      "x": 0.0,
+      "y": 3.5,
+      "z": 2.6
+    },
+    {
+      "id": "B2-Base",
+      "x": 4.0,
+      "y": 3.5,
+      "z": 0.0
+    },
+    {
+      "id": "B2-N1",
+      "x": 4.0,
+      "y": 3.5,
+      "z": 2.6
+    },
+    {
+      "id": "C2-Base",
+      "x": 7.5,
+      "y": 3.5,
+      "z": 0.0
+    },
+    {
+      "id": "C2-N1",
+      "x": 7.5,
+      "y": 3.5,
+      "z": 2.6
+    },
+    {
+      "id": "A3-Base",
+      "x": 0.0,
+      "y": 6.5,
+      "z": 0.0
+    },
+    {
+      "id": "A3-N1",
+      "x": 0.0,
+      "y": 6.5,
+      "z": 2.6
+    },
+    {
+      "id": "B3-Base",
+      "x": 4.0,
+      "y": 6.5,
+      "z": 0.0
+    },
+    {
+      "id": "B3-N1",
+      "x": 4.0,
+      "y": 6.5,
+      "z": 2.6
+    },
+    {
+      "id": "C3-Base",
+      "x": 7.5,
+      "y": 6.5,
+      "z": 0.0
+    },
+    {
+      "id": "C3-N1",
+      "x": 7.5,
+      "y": 6.5,
+      "z": 2.6
+    },
+    {
+      "id": "A1-N2",
+      "x": 0.0,
+      "y": 0.0,
+      "z": 5.2
+    },
+    {
+      "id": "B1-N2",
+      "x": 4.0,
+      "y": 0.0,
+      "z": 5.2
+    },
+    {
+      "id": "C1-N2",
+      "x": 7.5,
+      "y": 0.0,
+      "z": 5.2
+    },
+    {
+      "id": "A2-N2",
+      "x": 0.0,
+      "y": 3.5,
+      "z": 5.2
+    },
+    {
+      "id": "B2-N2",
+      "x": 4.0,
+      "y": 3.5,
+      "z": 5.2
+    },
+    {
+      "id": "C2-N2",
+      "x": 7.5,
+      "y": 3.5,
+      "z": 5.2
+    },
+    {
+      "id": "A3-N2",
+      "x": 0.0,
+      "y": 6.5,
+      "z": 5.2
+    },
+    {
+      "id": "B3-N2",
+      "x": 4.0,
+      "y": 6.5,
+      "z": 5.2
+    },
+    {
+      "id": "C3-N2",
+      "x": 7.5,
+      "y": 6.5,
+      "z": 5.2
+    }
+  ],
+  "barras": [
+    {
+      "id": "C1",
+      "tipo": "columna",
+      "i": "A1-Base",
+      "j": "A1-N1",
+      "seccion": "Castillo 15x15",
+      "rotacion": 0.0
+    },
+    {
+      "id": "C2",
+      "tipo": "columna",
+      "i": "B1-Base",
+      "j": "B1-N1",
+      "seccion": "Castillo 15x15",
+      "rotacion": 0.0
+    },
+    {
+      "id": "C3",
+      "tipo": "columna",
+      "i": "C1-Base",
+      "j": "C1-N1",
+      "seccion": "Castillo 15x15",
+      "rotacion": 0.0
+    },
+    {
+      "id": "C4",
+      "tipo": "columna",
+      "i": "A2-Base",
+      "j": "A2-N1",
+      "seccion": "Castillo 15x15",
+      "rotacion": 0.0
+    },
+    {
+      "id": "C5",
+      "tipo": "columna",
+      "i": "B2-Base",
+      "j": "B2-N1",
+      "seccion": "Castillo 15x15",
+      "rotacion": 0.0
+    },
+    {
+      "id": "C6",
+      "tipo": "columna",
+      "i": "C2-Base",
+      "j": "C2-N1",
+      "seccion": "Castillo 15x15",
+      "rotacion": 0.0
+    },
+    {
+      "id": "C7",
+      "tipo": "columna",
+      "i": "A3-Base",
+      "j": "A3-N1",
+      "seccion": "Castillo 15x15",
+      "rotacion": 0.0
+    },
+    {
+      "id": "C8",
+      "tipo": "columna",
+      "i": "B3-Base",
+      "j": "B3-N1",
+      "seccion": "Castillo 15x15",
+      "rotacion": 0.0
+    },
+    {
+      "id": "C9",
+      "tipo": "columna",
+      "i": "C3-Base",
+      "j": "C3-N1",
+      "seccion": "Castillo 15x15",
+      "rotacion": 0.0
+    },
+    {
+      "id": "V1",
+      "tipo": "viga",
+      "i": "A1-N1",
+      "j": "B1-N1",
+      "seccion": "Dala 15x20",
+      "rotacion": 0.0
+    },
+    {
+      "id": "V2",
+      "tipo": "viga",
+      "i": "B1-N1",
+      "j": "C1-N1",
+      "seccion": "Dala 15x20",
+      "rotacion": 0.0
+    },
+    {
+      "id": "V3",
+      "tipo": "viga",
+      "i": "A2-N1",
+      "j": "B2-N1",
+      "seccion": "Dala 15x20",
+      "rotacion": 0.0
+    },
+    {
+      "id": "V4",
+      "tipo": "viga",
+      "i": "B2-N1",
+      "j": "C2-N1",
+      "seccion": "Dala 15x20",
+      "rotacion": 0.0
+    },
+    {
+      "id": "V5",
+      "tipo": "viga",
+      "i": "A3-N1",
+      "j": "B3-N1",
+      "seccion": "Dala 15x20",
+      "rotacion": 0.0
+    },
+    {
+      "id": "V6",
+      "tipo": "viga",
+      "i": "B3-N1",
+      "j": "C3-N1",
+      "seccion": "Dala 15x20",
+      "rotacion": 0.0
+    },
+    {
+      "id": "V7",
+      "tipo": "viga",
+      "i": "A1-N1",
+      "j": "A2-N1",
+      "seccion": "Dala 15x20",
+      "rotacion": 0.0
+    },
+    {
+      "id": "V8",
+      "tipo": "viga",
+      "i": "A2-N1",
+      "j": "A3-N1",
+      "seccion": "Dala 15x20",
+      "rotacion": 0.0
+    },
+    {
+      "id": "V9",
+      "tipo": "viga",
+      "i": "B1-N1",
+      "j": "B2-N1",
+      "seccion": "Dala 15x20",
+      "rotacion": 0.0
+    },
+    {
+      "id": "V10",
+      "tipo": "viga",
+      "i": "B2-N1",
+      "j": "B3-N1",
+      "seccion": "Dala 15x20",
+      "rotacion": 0.0
+    },
+    {
+      "id": "V11",
+      "tipo": "viga",
+      "i": "C1-N1",
+      "j": "C2-N1",
+      "seccion": "Dala 15x20",
+      "rotacion": 0.0
+    },
+    {
+      "id": "V12",
+      "tipo": "viga",
+      "i": "C2-N1",
+      "j": "C3-N1",
+      "seccion": "Dala 15x20",
+      "rotacion": 0.0
+    },
+    {
+      "id": "C10",
+      "tipo": "columna",
+      "i": "A1-N1",
+      "j": "A1-N2",
+      "seccion": "Castillo 15x15",
+      "rotacion": 0.0
+    },
+    {
+      "id": "C11",
+      "tipo": "columna",
+      "i": "B1-N1",
+      "j": "B1-N2",
+      "seccion": "Castillo 15x15",
+      "rotacion": 0.0
+    },
+    {
+      "id": "C12",
+      "tipo": "columna",
+      "i": "C1-N1",
+      "j": "C1-N2",
+      "seccion": "Castillo 15x15",
+      "rotacion": 0.0
+    },
+    {
+      "id": "C13",
+      "tipo": "columna",
+      "i": "A2-N1",
+      "j": "A2-N2",
+      "seccion": "Castillo 15x15",
+      "rotacion": 0.0
+    },
+    {
+      "id": "C14",
+      "tipo": "columna",
+      "i": "B2-N1",
+      "j": "B2-N2",
+      "seccion": "Castillo 15x15",
+      "rotacion": 0.0
+    },
+    {
+      "id": "C15",
+      "tipo": "columna",
+      "i": "C2-N1",
+      "j": "C2-N2",
+      "seccion": "Castillo 15x15",
+      "rotacion": 0.0
+    },
+    {
+      "id": "C16",
+      "tipo": "columna",
+      "i": "A3-N1",
+      "j": "A3-N2",
+      "seccion": "Castillo 15x15",
+      "rotacion": 0.0
+    },
+    {
+      "id": "C17",
+      "tipo": "columna",
+      "i": "B3-N1",
+      "j": "B3-N2",
+      "seccion": "Castillo 15x15",
+      "rotacion": 0.0
+    },
+    {
+      "id": "C18",
+      "tipo": "columna",
+      "i": "C3-N1",
+      "j": "C3-N2",
+      "seccion": "Castillo 15x15",
+      "rotacion": 0.0
+    },
+    {
+      "id": "V13",
+      "tipo": "viga",
+      "i": "A1-N2",
+      "j": "B1-N2",
+      "seccion": "Dala 15x20",
+      "rotacion": 0.0
+    },
+    {
+      "id": "V14",
+      "tipo": "viga",
+      "i": "B1-N2",
+      "j": "C1-N2",
+      "seccion": "Dala 15x20",
+      "rotacion": 0.0
+    },
+    {
+      "id": "V15",
+      "tipo": "viga",
+      "i": "A2-N2",
+      "j": "B2-N2",
+      "seccion": "Dala 15x20",
+      "rotacion": 0.0
+    },
+    {
+      "id": "V16",
+      "tipo": "viga",
+      "i": "B2-N2",
+      "j": "C2-N2",
+      "seccion": "Dala 15x20",
+      "rotacion": 0.0
+    },
+    {
+      "id": "V17",
+      "tipo": "viga",
+      "i": "A3-N2",
+      "j": "B3-N2",
+      "seccion": "Dala 15x20",
+      "rotacion": 0.0
+    },
+    {
+      "id": "V18",
+      "tipo": "viga",
+      "i": "B3-N2",
+      "j": "C3-N2",
+      "seccion": "Dala 15x20",
+      "rotacion": 0.0
+    },
+    {
+      "id": "V19",
+      "tipo": "viga",
+      "i": "A1-N2",
+      "j": "A2-N2",
+      "seccion": "Dala 15x20",
+      "rotacion": 0.0
+    },
+    {
+      "id": "V20",
+      "tipo": "viga",
+      "i": "A2-N2",
+      "j": "A3-N2",
+      "seccion": "Dala 15x20",
+      "rotacion": 0.0
+    },
+    {
+      "id": "V21",
+      "tipo": "viga",
+      "i": "B1-N2",
+      "j": "B2-N2",
+      "seccion": "Dala 15x20",
+      "rotacion": 0.0
+    },
+    {
+      "id": "V22",
+      "tipo": "viga",
+      "i": "B2-N2",
+      "j": "B3-N2",
+      "seccion": "Dala 15x20",
+      "rotacion": 0.0
+    },
+    {
+      "id": "V23",
+      "tipo": "viga",
+      "i": "C1-N2",
+      "j": "C2-N2",
+      "seccion": "Dala 15x20",
+      "rotacion": 0.0
+    },
+    {
+      "id": "V24",
+      "tipo": "viga",
+      "i": "C2-N2",
+      "j": "C3-N2",
+      "seccion": "Dala 15x20",
+      "rotacion": 0.0
+    }
+  ],
+  "areas": [
+    {
+      "id": "L1",
+      "tipo": "losa",
+      "nodos": [
+        "A1-N1",
+        "B1-N1",
+        "B2-N1",
+        "A2-N1"
+      ],
+      "seccion": "Losa 10"
+    },
+    {
+      "id": "L2",
+      "tipo": "losa",
+      "nodos": [
+        "A2-N1",
+        "B2-N1",
+        "B3-N1",
+        "A3-N1"
+      ],
+      "seccion": "Losa 10"
+    },
+    {
+      "id": "L3",
+      "tipo": "losa",
+      "nodos": [
+        "B1-N1",
+        "C1-N1",
+        "C2-N1",
+        "B2-N1"
+      ],
+      "seccion": "Losa 10"
+    },
+    {
+      "id": "L4",
+      "tipo": "losa",
+      "nodos": [
+        "B2-N1",
+        "C2-N1",
+        "C3-N1",
+        "B3-N1"
+      ],
+      "seccion": "Losa 10"
+    },
+    {
+      "id": "L5",
+      "tipo": "losa",
+      "nodos": [
+        "A1-N2",
+        "B1-N2",
+        "B2-N2",
+        "A2-N2"
+      ],
+      "seccion": "Losa 10"
+    },
+    {
+      "id": "L6",
+      "tipo": "losa",
+      "nodos": [
+        "A2-N2",
+        "B2-N2",
+        "B3-N2",
+        "A3-N2"
+      ],
+      "seccion": "Losa 10"
+    },
+    {
+      "id": "L7",
+      "tipo": "losa",
+      "nodos": [
+        "B1-N2",
+        "C1-N2",
+        "C2-N2",
+        "B2-N2"
+      ],
+      "seccion": "Losa 10"
+    },
+    {
+      "id": "L8",
+      "tipo": "losa",
+      "nodos": [
+        "B2-N2",
+        "C2-N2",
+        "C3-N2",
+        "B3-N2"
+      ],
+      "seccion": "Losa 10"
+    },
+    {
+      "id": "M1",
+      "tipo": "muro",
+      "nodos": [
+        "A1-Base",
+        "B1-Base",
+        "B1-N1",
+        "A1-N1"
+      ],
+      "seccion": "Muro tabique 14"
+    },
+    {
+      "id": "M2",
+      "tipo": "muro",
+      "nodos": [
+        "B1-Base",
+        "C1-Base",
+        "C1-N1",
+        "B1-N1"
+      ],
+      "seccion": "Muro tabique 14"
+    },
+    {
+      "id": "M3",
+      "tipo": "muro",
+      "nodos": [
+        "A3-Base",
+        "B3-Base",
+        "B3-N1",
+        "A3-N1"
+      ],
+      "seccion": "Muro tabique 14"
+    },
+    {
+      "id": "M4",
+      "tipo": "muro",
+      "nodos": [
+        "B3-Base",
+        "C3-Base",
+        "C3-N1",
+        "B3-N1"
+      ],
+      "seccion": "Muro tabique 14"
+    },
+    {
+      "id": "M5",
+      "tipo": "muro",
+      "nodos": [
+        "A1-Base",
+        "A2-Base",
+        "A2-N1",
+        "A1-N1"
+      ],
+      "seccion": "Muro tabique 14"
+    },
+    {
+      "id": "M6",
+      "tipo": "muro",
+      "nodos": [
+        "A2-Base",
+        "A3-Base",
+        "A3-N1",
+        "A2-N1"
+      ],
+      "seccion": "Muro tabique 14"
+    },
+    {
+      "id": "M7",
+      "tipo": "muro",
+      "nodos": [
+        "C1-Base",
+        "C2-Base",
+        "C2-N1",
+        "C1-N1"
+      ],
+      "seccion": "Muro tabique 14"
+    },
+    {
+      "id": "M8",
+      "tipo": "muro",
+      "nodos": [
+        "C2-Base",
+        "C3-Base",
+        "C3-N1",
+        "C2-N1"
+      ],
+      "seccion": "Muro tabique 14"
+    },
+    {
+      "id": "M9",
+      "tipo": "muro",
+      "nodos": [
+        "B1-Base",
+        "B2-Base",
+        "B2-N1",
+        "B1-N1"
+      ],
+      "seccion": "Muro tabique 14"
+    },
+    {
+      "id": "M10",
+      "tipo": "muro",
+      "nodos": [
+        "A1-N1",
+        "B1-N1",
+        "B1-N2",
+        "A1-N2"
+      ],
+      "seccion": "Muro tabique 14"
+    },
+    {
+      "id": "M11",
+      "tipo": "muro",
+      "nodos": [
+        "B1-N1",
+        "C1-N1",
+        "C1-N2",
+        "B1-N2"
+      ],
+      "seccion": "Muro tabique 14"
+    },
+    {
+      "id": "M12",
+      "tipo": "muro",
+      "nodos": [
+        "A3-N1",
+        "B3-N1",
+        "B3-N2",
+        "A3-N2"
+      ],
+      "seccion": "Muro tabique 14"
+    },
+    {
+      "id": "M13",
+      "tipo": "muro",
+      "nodos": [
+        "B3-N1",
+        "C3-N1",
+        "C3-N2",
+        "B3-N2"
+      ],
+      "seccion": "Muro tabique 14"
+    },
+    {
+      "id": "M14",
+      "tipo": "muro",
+      "nodos": [
+        "A1-N1",
+        "A2-N1",
+        "A2-N2",
+        "A1-N2"
+      ],
+      "seccion": "Muro tabique 14"
+    },
+    {
+      "id": "M15",
+      "tipo": "muro",
+      "nodos": [
+        "A2-N1",
+        "A3-N1",
+        "A3-N2",
+        "A2-N2"
+      ],
+      "seccion": "Muro tabique 14"
+    },
+    {
+      "id": "M16",
+      "tipo": "muro",
+      "nodos": [
+        "C1-N1",
+        "C2-N1",
+        "C2-N2",
+        "C1-N2"
+      ],
+      "seccion": "Muro tabique 14"
+    },
+    {
+      "id": "M17",
+      "tipo": "muro",
+      "nodos": [
+        "C2-N1",
+        "C3-N1",
+        "C3-N2",
+        "C2-N2"
+      ],
+      "seccion": "Muro tabique 14"
+    },
+    {
+      "id": "M18",
+      "tipo": "muro",
+      "nodos": [
+        "B1-N1",
+        "B2-N1",
+        "B2-N2",
+        "B1-N2"
+      ],
+      "seccion": "Muro tabique 14"
+    }
+  ],
+  "apoyos": [
+    {
+      "nodo": "A1-Base",
+      "restricciones": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ]
+    },
+    {
+      "nodo": "B1-Base",
+      "restricciones": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ]
+    },
+    {
+      "nodo": "C1-Base",
+      "restricciones": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ]
+    },
+    {
+      "nodo": "A2-Base",
+      "restricciones": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ]
+    },
+    {
+      "nodo": "B2-Base",
+      "restricciones": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ]
+    },
+    {
+      "nodo": "C2-Base",
+      "restricciones": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ]
+    },
+    {
+      "nodo": "A3-Base",
+      "restricciones": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ]
+    },
+    {
+      "nodo": "B3-Base",
+      "restricciones": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ]
+    },
+    {
+      "nodo": "C3-Base",
+      "restricciones": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ]
+    }
+  ],
+  "patrones": [
+    {
+      "nombre": "CM",
+      "tipo": "muerta",
+      "peso_propio": 1.0
+    },
+    {
+      "nombre": "CV",
+      "tipo": "viva",
+      "peso_propio": 0.0
+    }
+  ],
+  "cargas_nodales": [],
+  "cargas_distribuidas": [],
+  "cargas_area": [
+    {
+      "patron": "CM",
+      "area": "L1",
+      "direccion": "Z",
+      "w": -2.5
+    },
+    {
+      "patron": "CM",
+      "area": "L2",
+      "direccion": "Z",
+      "w": -2.5
+    },
+    {
+      "patron": "CM",
+      "area": "L3",
+      "direccion": "Z",
+      "w": -2.5
+    },
+    {
+      "patron": "CM",
+      "area": "L4",
+      "direccion": "Z",
+      "w": -2.5
+    },
+    {
+      "patron": "CM",
+      "area": "L5",
+      "direccion": "Z",
+      "w": -2.5
+    },
+    {
+      "patron": "CM",
+      "area": "L6",
+      "direccion": "Z",
+      "w": -2.5
+    },
+    {
+      "patron": "CM",
+      "area": "L7",
+      "direccion": "Z",
+      "w": -2.5
+    },
+    {
+      "patron": "CM",
+      "area": "L8",
+      "direccion": "Z",
+      "w": -2.5
+    },
+    {
+      "patron": "CV",
+      "area": "L1",
+      "direccion": "Z",
+      "w": -1.9
+    },
+    {
+      "patron": "CV",
+      "area": "L2",
+      "direccion": "Z",
+      "w": -1.9
+    },
+    {
+      "patron": "CV",
+      "area": "L3",
+      "direccion": "Z",
+      "w": -1.9
+    },
+    {
+      "patron": "CV",
+      "area": "L4",
+      "direccion": "Z",
+      "w": -1.9
+    },
+    {
+      "patron": "CV",
+      "area": "L5",
+      "direccion": "Z",
+      "w": -1.9
+    },
+    {
+      "patron": "CV",
+      "area": "L6",
+      "direccion": "Z",
+      "w": -1.9
+    },
+    {
+      "patron": "CV",
+      "area": "L7",
+      "direccion": "Z",
+      "w": -1.9
+    },
+    {
+      "patron": "CV",
+      "area": "L8",
+      "direccion": "Z",
+      "w": -1.9
+    }
+  ],
+  "combinaciones": [
+    {
+      "nombre": "CM+CV",
+      "factores": {
+        "CM": 1.0,
+        "CV": 1.0
+      }
+    },
+    {
+      "nombre": "1.3CM+1.5CV",
+      "factores": {
+        "CM": 1.3,
+        "CV": 1.5
+      }
+    }
+  ],
+  "fuente_masa": {
+    "CM": 1.0,
+    "CV": 0.5
+  },
+  "peso_propio_en_masa": true,
+  "masas_nodales": [],
+  "espectro": {
+    "tipo": "ntc",
+    "nombre": "Ilustrativo (Q'R = 3)",
+    "a0": 0.15,
+    "c": 0.45,
+    "Ta": 0.4,
+    "Tb": 1.2,
+    "k": 1.0,
+    "beta": 1.0,
+    "reduccion": 3.0
+  },
+  "tamano_malla": 0.65,
+  "rejilla": {
+    "ejes_x": [
+      {
+        "nombre": "A",
+        "coord": 0.0
+      },
+      {
+        "nombre": "B",
+        "coord": 4.0
+      },
+      {
+        "nombre": "C",
+        "coord": 7.5
+      }
+    ],
+    "ejes_y": [
+      {
+        "nombre": "1",
+        "coord": 0.0
+      },
+      {
+        "nombre": "2",
+        "coord": 3.5
+      },
+      {
+        "nombre": "3",
+        "coord": 6.5
+      }
+    ],
+    "niveles": [
+      {
+        "nombre": "Base",
+        "z": 0.0
+      },
+      {
+        "nombre": "N1",
+        "z": 2.6
+      },
+      {
+        "nombre": "N2",
+        "z": 5.2
+      }
+    ]
+  }
+}

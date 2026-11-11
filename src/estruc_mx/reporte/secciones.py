@@ -40,6 +40,8 @@ def modelo(d: DatosReporte) -> list[Bloque]:
         [
             ["Nodos", str(len(m.nodos))],
             ["Barras", ", ".join(f"{n} {t}s" for t, n in sorted(tipos.items())) or "0"],
+            *([["Muros y losas", f"{sum(a.tipo == 'muro' for a in m.areas)} muros, {sum(a.tipo == 'losa' for a in m.areas)} losas"],
+               ["Malla de muros y losas", f"elementos de {m.tamano_malla:g} m o menos"]] if m.areas else []),
             ["Nodos con apoyo", str(len(m.apoyos))],
             ["Niveles sobre la base", str(max(len(niveles) - 1, 0))],
             ["Altura total (m)", _f(niveles[-1] - niveles[0]) if niveles else "-"],
@@ -51,7 +53,9 @@ def modelo(d: DatosReporte) -> list[Bloque]:
         texto={0, 1},
     ))
     png, _ = figuras.deformada(m, titulo=m.nombre)
-    b.append(Figura(png, "Geometría del modelo (columnas en azul, vigas en verde)", ancho=0.7))
+    leyenda = "Geometría del modelo (columnas en azul, vigas en verde"
+    leyenda += ", muros en ocre y losas en azul claro)" if m.areas else ")"
+    b.append(Figura(png, leyenda, ancho=0.7))
 
     b.append(Titulo("Materiales", 2))
     b.append(Tabla(
@@ -69,6 +73,20 @@ def modelo(d: DatosReporte) -> list[Bloque]:
         ["Sección", "Material", "b × h", "A (m²)", "I33 (m⁴)", "I22 (m⁴)", "J (m⁴)"],
         filas, titulo="Secciones", texto={0, 1, 2},
     ))
+    if m.secciones_area and m.areas:
+        b.append(Titulo("Secciones de muro y losa", 2))
+        usos = Counter(a.seccion for a in m.areas)
+        b.append(Tabla(
+            ["Sección", "Tipo", "Material", "Espesor (cm)", "Mod. rigidez", "Áreas"],
+            [[s.nombre, s.tipo, s.material, _f(s.espesor * 100, 1), _f(s.mod_rigidez, 2), str(usos.get(s.nombre, 0))]
+             for s in m.secciones_area],
+            titulo="Secciones de muro y losa", texto={0, 1, 2},
+        ))
+        b.append(Parrafo(
+            "Muros y losas se analizan como cáscaras elásticas (membrana más placa) divididas en elementos "
+            "de cuatro nodos. El módulo de cortante es G = E/(2(1 + ν)); para mampostería las NTC indican "
+            "G = 0.2·Em, que este modelo isótropo no reproduce.", "nota",
+        ))
     return b
 
 
@@ -89,9 +107,21 @@ def cargas(d: DatosReporte) -> list[Bloque]:
             if c.patron == p.nombre:
                 nd += 1
                 F["XYZ".index(c.direccion)] += c.w * m.longitud(m.barra(c.barra))
-        filas.append([p.nombre, p.tipo, str(nn), str(nd), _f(F[0], 1), _f(F[1], 1), _f(F[2], 1)])
+        if p.peso_propio:
+            from ..modelo.malla import discretizar
+            from ..modelo.masas import pesos_propios
+
+            F[2] -= p.peso_propio * sum(pesos_propios(m, discretizar(m)).values())
+        na = 0
+        for c in m.cargas_area:
+            if c.patron == p.nombre:
+                na += 1
+                F["XYZ".index(c.direccion)] += c.w * m.superficie(m.area(c.area))
+        tipo = p.tipo + (f" + {p.peso_propio:g}×peso propio" if p.peso_propio else "")
+        filas.append([p.nombre, tipo, str(nn), str(nd), *([str(na)] if m.areas else []), _f(F[0], 1), _f(F[1], 1), _f(F[2], 1)])
     b.append(Tabla(
-        ["Patrón", "Tipo", "Cargas nodales", "Cargas en barras", "ΣFX (kN)", "ΣFY (kN)", "ΣFZ (kN)"],
+        ["Patrón", "Tipo", "Cargas nodales", "Cargas en barras", *(["Cargas en áreas"] if m.areas else []),
+         "ΣFX (kN)", "ΣFY (kN)", "ΣFZ (kN)"],
         filas, titulo="Patrones de carga y resultantes", texto={0, 1},
     ))
     combos = combinaciones_efectivas(m)
@@ -103,12 +133,14 @@ def cargas(d: DatosReporte) -> list[Bloque]:
     b.append(Titulo("Fuente de masa", 2))
     partes = [f"{f:g} × {p}" for p, f in m.fuente_masa.items()]
     if m.peso_propio_en_masa:
-        partes.append("peso propio de las barras")
+        partes.append("peso propio de las barras" + (", muros y losas" if m.areas else ""))
     if m.masas_nodales:
         partes.append(f"{len(m.masas_nodales)} masas nodales explícitas")
     b.append(Parrafo(
         "La masa para el análisis dinámico se obtiene de: " + (", ".join(partes) or "nada") + ". "
-        "Las cargas en barras se reparten mitad a cada extremo; solo se considera masa traslacional."
+        "Las cargas en barras se reparten mitad a cada extremo"
+        + ("; las de muros y losas, a los nodos de su malla" if m.areas else "")
+        + "; solo se considera masa traslacional."
     ))
     return b
 
@@ -205,7 +237,9 @@ def derivas(d: DatosReporte) -> list[Bloque]:
     limite, origen = d.opciones.limite()
     f = d.factor_deriva
     b.append(Parrafo(
-        "Distorsión máxima por entrepiso entre las columnas, del análisis modal espectral. "
+        "Distorsión máxima por entrepiso entre las columnas"
+        + (" y los bordes verticales de los muros" if any(a.tipo == "muro" for a in d.modelo.areas) else "")
+        + ", del análisis modal espectral. "
         f"Para compararla con el límite se multiplica por {f:g} (Q·R; por defecto la reducción del espectro)."
     ))
     if limite is None:
@@ -230,7 +264,7 @@ def derivas(d: DatosReporte) -> list[Bloque]:
         filas.append(fila)
     enc = ["Nivel (m)"]
     for k in d.espectral:
-        enc += [f"Δ/h {k}", f"Columna {k}"]
+        enc += [f"Δ/h {k}", f"Elemento {k}"]
     if limite is not None:
         enc.append("Cumple")
     texto = {0} | {2 + 2 * i for i in range(len(d.espectral))} | ({len(enc) - 1} if limite is not None else set())
@@ -280,12 +314,77 @@ def deformadas(d: DatosReporte) -> list[Bloque]:
     return b
 
 
+# --- 8. Muros y losas ----------------------------------------------------------
+_ENC_MURO = ["Muro", "Base (m)", "L (m)", "P (kN)", "V (kN)", "M (kN·m)", "V fuera (kN)", "M fuera (kN·m)"]
+
+
+def muros_losas(d: DatosReporte) -> list[Bloque]:
+    from ..analisis.areas import COMPONENTES_MURO, bases_muros, esfuerzos_areas, extremos_esfuerzos, todas_fuerzas_muros
+    from ..modelo.malla import discretizar
+
+    m = d.modelo
+    if not m.areas:
+        return []
+    malla = discretizar(m)
+    bases = bases_muros(m, malla)
+    b: list[Bloque] = [Titulo("Muros y losas")]
+    b.append(Parrafo(
+        f"{len(malla.elementos)} elementos de cáscara y {len(malla.nodos)} nodos en la malla de análisis. "
+        "Fuerzas en la base de cada muro: P axial (positiva en tensión), V y M en el plano del muro, "
+        "y V y M fuera del plano, en los ejes del muro (1 horizontal a lo largo, 2 vertical)."
+    ))
+    r = d.estatico
+    if bases and r is not None:
+        b.append(Titulo("Fuerzas en muros, análisis estático", 2))
+        for combo in r.combinaciones[:MAX_COMBINACIONES]:
+            f = todas_fuerzas_muros(m, malla, r.fuerzas_elementos.get(combo, {}))
+            filas = [[a, _f(x.elevacion, 2), _f(x.longitud, 2), *(_f(f[a][c], 1) for c in COMPONENTES_MURO[:5])]
+                     for a, x in bases.items()]
+            b.append(Tabla(_ENC_MURO, filas, titulo=f"Fuerzas en la base de los muros, {combo}"))
+        if len(r.combinaciones) > MAX_COMBINACIONES:
+            b.append(Parrafo(f"Se muestran las primeras {MAX_COMBINACIONES} combinaciones.", "nota"))
+    if bases and d.espectral:
+        b.append(Titulo("Fuerzas en muros, análisis modal espectral", 2))
+        for k, re_ in d.espectral.items():
+            if not re_.fuerzas_muros:
+                continue
+            filas = [[a, _f(x.elevacion, 2), _f(x.longitud, 2), *(_f(re_.fuerzas_muros[a][c], 1) for c in COMPONENTES_MURO[:5])]
+                     for a, x in bases.items()]
+            b.append(Tabla(_ENC_MURO, filas, titulo=f"Fuerzas en muros, sismo en {k} ({re_.metodo}, máximos sin signo)"))
+    losas = [a for a in m.areas if a.tipo == "losa"]
+    if losas and r is not None:
+        b.append(Titulo("Momentos en losas", 2))
+        b.append(Parrafo(
+            "Momentos por unidad de ancho al centro de los elementos, en los ejes de cada losa (1 = X, 2 = Y en "
+            "losas horizontales). Positivo: tensión en la cara inferior. Los valores dependen del tamaño de malla.",
+            "nota",
+        ))
+        for combo in r.combinaciones[:MAX_COMBINACIONES]:
+            esf = esfuerzos_areas(m, malla, r.desplazamientos[combo])
+            filas = []
+            for a in losas:
+                e = extremos_esfuerzos(esf[a.id])
+                filas.append([a.id, a.seccion, *(_f(v, 2) for v in (*e["M11"], *e["M22"])),
+                              _f(max(abs(v) for v in e["M12"]), 2)])
+            b.append(Tabla(
+                ["Losa", "Sección", "M11 mín", "M11 máx", "M22 mín", "M22 máx", "|M12| máx"],
+                filas, titulo=f"Momentos en losas (kN·m/m), {combo}", texto={0, 1},
+            ))
+    return b
+
+
 # --- Avisos --------------------------------------------------------------------
 def notas(d: DatosReporte) -> list[Bloque]:
     elementos = list(d.avisos) + [
         "Prueba de concepto (fase 0): revisar los resultados con un cálculo independiente antes de usarlos.",
         "Las distorsiones límite y el espectro paramétrico deben verificarse contra la edición vigente de las NTC.",
     ]
+    if d.modelo.areas:
+        elementos.append(
+            "Muros y losas: los dos motores usan elementos de cáscara distintos (PyNite DKMQ, OpenSees ShellMITC4) "
+            "sobre la misma malla; con malla de 0.5 m sus resultados difieren menos de 3 %. No hay diafragma rígido: "
+            "las losas aportan su rigidez en su plano."
+        )
     return [Titulo("Notas y limitaciones"), Lista(elementos)]
 
 
@@ -297,5 +396,6 @@ SECCIONES: dict[str, Seccion] = {
     "cortante": cortante,
     "derivas": derivas,
     "deformadas": deformadas,
+    "muros": muros_losas,
     "notas": notas,
 }

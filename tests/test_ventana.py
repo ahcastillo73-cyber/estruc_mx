@@ -10,6 +10,7 @@ pytest.importorskip("pytestqt", reason="pytest-qt no está instalado")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from estruc_mx.app.ventana import VentanaPrincipal  # noqa: E402
+from estruc_mx.modelo import EspectroNTC  # noqa: E402
 
 EJEMPLO = str(Path(__file__).resolve().parent.parent / "ejemplos" / "marco_3niveles.json")
 
@@ -130,3 +131,68 @@ def test_errores_de_edicion_se_registran_sin_cambiar_el_modelo(ventana):
     ventana.fijar_modo("columna")
     ventana.clic(("punto", (0.0, 0.0, 0.0)))  # no hay nivel abajo de la base
     assert ventana.sesion.modelo is antes
+
+
+def test_dibujar_muros_y_losas_analizar_y_ver_fuerzas(ventana):
+    ventana.nuevo_modelo("Muros", [5.0], [4.0], [3.0, 3.0])
+    ventana.selector_seccion_area.setCurrentText("Muro tabique 14")
+    ventana.fijar_modo("muro")
+    ventana.clic(("nodo", "A1-N1"))
+    ventana.clic(("nodo", "B1-N1"))  # muro A1–B1 de la base al N1
+    ventana.clic(("nodo", "B2-N1"))  # sigue desde B1: muro B1–B2
+    m = ventana.sesion.modelo
+    assert [a.id for a in m.areas] == ["M1", "M2"] and m.area("M1").seccion == "Muro tabique 14"
+    ventana.fijar_modo("losa")
+    ventana.selector_seccion_area.setCurrentText("Losa 10")
+    ventana.clic(("punto", (0.0, 0.0, 3.0)))
+    ventana.clic(("punto", (5.0, 4.0, 3.0)))
+    assert ventana.sesion.modelo.area("L1").tipo == "losa"
+    assert ventana.arbol.topLevelItem(2).text(0) == "Muros y losas (3)"
+
+    # Seleccionar la losa, cargarla y ver sus propiedades
+    ventana.fijar_modo("seleccionar")
+    ventana.clic(("area", "L1"))
+    assert ventana.sel_areas == {"L1"} and "seccion_area" in ventana.controles_propiedades
+    ventana.hacer_carga_area("CM", "Z", -5.0)
+    assert ventana.sesion.modelo.cargas_area[0].area == "L1"
+    ventana.aplicar_propiedad("id", "Azotea")
+    assert ventana.sel_areas == {"Azotea"} and ventana.sesion.modelo.cargas_area[0].area == "Azotea"
+
+    ventana.ejecutar_estatico()
+    assert {"Fuerzas en muros", "Momentos en losas"} <= set(items(ventana.selector_tabla))
+    ventana.selector_tabla.setCurrentText("Fuerzas en muros")
+    assert ventana.tabla.rowCount() == 2
+    ventana.selector_tabla.setCurrentText("Momentos en losas")
+    assert ventana.tabla.rowCount() == 1
+    # Solo los nodos del modelo en la tabla de desplazamientos
+    ventana.selector_tabla.setCurrentText("Desplazamientos")
+    assert ventana.tabla.rowCount() == len(ventana.sesion.modelo.nodos)
+
+    # Borrar un muro con la selección y deshacer
+    ventana.seleccionar(areas=["M2"])
+    ventana.borrar_seleccion()
+    assert [a.id for a in ventana.sesion.modelo.areas] == ["M1", "Azotea"]
+    ventana.deshacer()
+    assert len(ventana.sesion.modelo.areas) == 3
+
+    ventana.hacer_definir(
+        "secciones_area",
+        [["Tabique", "muro", "Tabique rojo", "0.14", "1"], ["Muro concreto 15", "muro", "Concreto f'c 250", "0.15", "0.5"],
+         ["Losa 10", "losa", "Concreto f'c 250", "0.1", "1"]],
+        {"Muro tabique 14": "Tabique"},
+    )
+    assert ventana.sesion.modelo.area("M1").seccion == "Tabique"
+    assert ventana.sesion.modelo.seccion_area("Muro concreto 15").mod_rigidez == 0.5
+
+
+def test_losas_desde_rejilla_y_espectral_con_muros(ventana):
+    ventana.nuevo_modelo("Edificio", [6.0, 4.0], [5.0], [3.0])
+    n = ventana.sesion.editor.losas_desde_rejilla("Losa 10")
+    assert n == 2
+    ventana.sesion.editor.agregar_muro((0, 0), (6, 0), 0.0, 3.0, "Muro concreto 15")
+    ventana.sesion.editor.definir_espectro(EspectroNTC(nombre="E", a0=0.1, c=0.3, Ta=0.4, Tb=1.2, k=1.0))
+    ventana.n_modos.setValue(4)
+    ventana.ejecutar_espectral("X")
+    assert "Muros espectral X" in items(ventana.selector_tabla)
+    ventana.selector_tabla.setCurrentText("Muros espectral X")
+    assert ventana.tabla.rowCount() == 1

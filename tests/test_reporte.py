@@ -25,8 +25,9 @@ def test_preparar_corre_todos_los_analisis(datos):
 def test_documento_tiene_todas_las_secciones_numeradas(datos):
     doc = construir(datos)
     titulos = [b for b in doc.bloques if isinstance(b, Titulo) and b.nivel == 1]
-    assert len(titulos) == len(SECCIONES)
-    assert [t.numero for t in titulos] == [f"{i}." for i in range(1, len(SECCIONES) + 1)]
+    # «muros» no aparece en un modelo sin muros ni losas
+    assert len(titulos) == len(SECCIONES) - 1
+    assert [t.numero for t in titulos] == [f"{i}." for i in range(1, len(SECCIONES))]
     figuras = [b for b in doc.bloques if isinstance(b, Figura)]
     assert figuras and all(f.png.startswith(b"\x89PNG") for f in figuras)
     assert all(f.numero.startswith("Figura") for f in figuras)
@@ -77,3 +78,18 @@ def test_cli_reporte(tmp_path, capsys):
     assert destino.read_bytes().startswith(b"%PDF")
     assert main(["reporte", "--sistemas"]) == 0
     assert "marco_ductil_concreto" in capsys.readouterr().out
+
+
+def test_reporte_con_muros_y_losas(tmp_path):
+    from edificios import edificio_muros
+
+    d = preparar(edificio_muros(), Opciones(n_modos=6, sistema="mamposteria_confinada"))
+    doc = construir(d)
+    tablas = {b.titulo: b for b in doc.bloques if isinstance(b, Tabla)}
+    assert "Secciones de muro y losa" in tablas
+    muros = tablas["Fuerzas en la base de los muros, CM+SX"]
+    assert [f[0] for f in muros.filas] == ["M1", "M2", "M3", "M4"]
+    assert "Fuerzas en muros, sismo en X (CQC, máximos sin signo)" in tablas
+    assert len(tablas["Momentos en losas (kN·m/m), CM+CV"].filas) == 4
+    for ext in (".pdf", ".docx"):
+        assert escribir(doc, tmp_path / f"r{ext}").stat().st_size > 10_000

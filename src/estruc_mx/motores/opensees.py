@@ -5,6 +5,9 @@ y ejecutar por su cuenta. La aplicación lo ejecuta en un proceso aparte: así u
 caída del motor no tumba la interfaz y OpenSees nunca se enlaza con el programa.
 
 El script imprime los resultados en JSON, en ejes globales del modelo.
+
+Se analiza la malla de `modelo/malla.py`, la misma que usa PyNite: muros y losas como elementos
+ShellMITC4 con sección ElasticMembranePlateSection, y las barras que pasan por la malla, en tramos.
 """
 
 from __future__ import annotations
@@ -16,6 +19,8 @@ import tempfile
 from pathlib import Path
 
 from ..modelo import Edificio, masas_nodales
+from ..modelo.malla import discretizar
+from ..modelo.masas import peso_lineal
 from .comun import combinaciones_efectivas
 from .resultados import Modos, Resultados
 
@@ -28,8 +33,11 @@ def _num(v: float) -> str:
 
 def generar_script(modelo: Edificio) -> str:
     """Devuelve el script OpenSeesPy (texto) que analiza todas las combinaciones."""
-    tag_nodo = {n.id: k for k, n in enumerate(modelo.nodos, start=1)}
-    tag_barra = {b.id: k for k, b in enumerate(modelo.barras, start=1)}
+    malla = discretizar(modelo)
+    tag_nodo = {nid: k for k, nid in enumerate(malla.nodos, start=1)}
+    tag_seg = {sg.id: k for k, sg in enumerate(malla.segmentos, start=1)}
+    tag_elem = {e.id: k for k, e in enumerate(malla.elementos, start=len(tag_seg) + 1)}
+    tag_sec_area = {s.nombre: k for k, s in enumerate(modelo.secciones_area, start=1)}
     combos = combinaciones_efectivas(modelo)
 
     L: list[str] = []
@@ -42,9 +50,10 @@ def generar_script(modelo: Edificio) -> str:
     w("import openseespy.opensees as ops")
     w("")
     w(f"NODOS = {json.dumps(tag_nodo, ensure_ascii=False)}  # id del modelo -> tag OpenSees")
-    w(f"APOYOS = {json.dumps([a.nodo for a in modelo.apoyos], ensure_ascii=False)}")
+    w(f"APOYOS = {json.dumps(list(malla.apoyos), ensure_ascii=False)}")
+    w(f"CASCARAS = {json.dumps(tag_elem, ensure_ascii=False)}  # elementos de muros y losas")
     try:
-        masas = masas_nodales(modelo)
+        masas = masas_nodales(modelo, malla)
     except ValueError:
         masas = {}
     w(f"MASAS = {json.dumps({n: round(m, 12) for n, m in masas.items()}, ensure_ascii=False)}  # t, traslacional")
@@ -53,22 +62,35 @@ def generar_script(modelo: Edificio) -> str:
     w("def construir():")
     w("    ops.wipe()")
     w("    ops.model('basic', '-ndm', 3, '-ndf', 6)")
-    for n in modelo.nodos:
-        w(f"    ops.node({tag_nodo[n.id]}, {_num(n.x)}, {_num(n.y)}, {_num(n.z)})  # {n.id}")
-    for a in modelo.apoyos:
-        fijos = ", ".join("1" if r else "0" for r in a.restricciones)
-        w(f"    ops.fix({tag_nodo[a.nodo]}, {fijos})")
-    for b in modelo.barras:
+    for nid, p in malla.nodos.items():
+        w(f"    ops.node({tag_nodo[nid]}, {_num(p[0])}, {_num(p[1])}, {_num(p[2])})  # {nid}")
+    for nid, r in malla.apoyos.items():
+        fijos = ", ".join("1" if x else "0" for x in r)
+        w(f"    ops.fix({tag_nodo[nid]}, {fijos})")
+    for sg in malla.segmentos:
+        b = modelo.barra(sg.barra)
         s = modelo.seccion(b.seccion)
         m = modelo.material(s.material)
         _, _, z = modelo.ejes_locales(b)
-        t = tag_barra[b.id]
-        w(f"    # {b.tipo} {b.id}, sección {s.nombre}")
+        t = tag_seg[sg.id]
+        w(f"    # {b.tipo} {sg.id}, sección {s.nombre}")
         w(f"    ops.geomTransf('Linear', {t}, {_num(z[0])}, {_num(z[1])}, {_num(z[2])})")
         w(
-            f"    ops.element('elasticBeamColumn', {t}, {tag_nodo[b.i]}, {tag_nodo[b.j]}, "
+            f"    ops.element('elasticBeamColumn', {t}, {tag_nodo[sg.i]}, {tag_nodo[sg.j]}, "
             f"{_num(s.A)}, {_num(m.E)}, {_num(m.G)}, {_num(s.J)}, {_num(s.I22)}, {_num(s.I33)}, {t})"
         )
+    if malla.elementos:
+        w("    # Muros y losas: cáscara elástica (la masa va en los nodos, densidad 0)")
+        for s in modelo.secciones_area:
+            m = modelo.material(s.material)
+            w(
+                f"    ops.section('ElasticMembranePlateSection', {tag_sec_area[s.nombre]}, "
+                f"{_num(m.E * s.mod_rigidez)}, {_num(m.nu)}, {_num(s.espesor)}, 0.0)  # {s.nombre}"
+            )
+        seccion = {a.id: a.seccion for a in modelo.areas}
+        for e in malla.elementos:
+            nodos = ", ".join(str(tag_nodo[n]) for n in e.nodos)
+            w(f"    ops.element('ShellMITC4', {tag_elem[e.id]}, {nodos}, {tag_sec_area[seccion[e.area]]})  # {e.id}")
     w("")
     w("")
     w("def cargas(factores):")
@@ -83,12 +105,28 @@ def generar_script(modelo: Edificio) -> str:
         x, y, z = modelo.ejes_locales(b)
         g = {"X": 0, "Y": 1, "Z": 2}[c.direccion]
         wy, wz, wx = c.w * y[g], c.w * z[g], c.w * x[g]
-        w(
-            f"    k = factores.get({c.patron!r}, 0.0)"
-            f"; ops.eleLoad('-ele', {tag_barra[b.id]}, '-type', '-beamUniform', "
-            f"k * {_num(wy)}, k * {_num(wz)}, k * {_num(wx)})"
-        )
-    w("    pass")
+        for sg in malla.segmentos_de(c.barra):
+            w(
+                f"    k = factores.get({c.patron!r}, 0.0)"
+                f"; ops.eleLoad('-ele', {tag_seg[sg.id]}, '-type', '-beamUniform', "
+                f"k * {_num(wy)}, k * {_num(wz)}, k * {_num(wx)})"
+            )
+    for p in modelo.patrones:
+        if not p.peso_propio:
+            continue
+        w(f"    k = factores.get({p.nombre!r}, 0.0) * {_num(p.peso_propio)}  # peso propio")
+        for sg in malla.segmentos:
+            peso = peso_lineal(modelo, sg.barra)
+            if peso:
+                x, y, z = modelo.ejes_locales(modelo.barra(sg.barra))
+                wy, wz, wx = -peso * y[2], -peso * z[2], -peso * x[2]
+                w(f"    ops.eleLoad('-ele', {tag_seg[sg.id]}, '-type', '-beamUniform', k * {_num(wy)}, k * {_num(wz)}, k * {_num(wx)})")
+        for nid, peso in malla.peso_areas.items():
+            w(f"    ops.load({tag_nodo[nid]}, 0.0, 0.0, k * {_num(-peso)}, 0.0, 0.0, 0.0)")
+    for patron, tabla in malla.cargas_area.items():
+        w(f"    k = factores.get({patron!r}, 0.0)  # cargas por m² repartidas a los nodos")
+        for nid, F in tabla.items():
+            w(f"    ops.load({tag_nodo[nid]}, k * {_num(F[0])}, k * {_num(F[1])}, k * {_num(F[2])}, 0.0, 0.0, 0.0)")
     w("")
     w("")
     w("def analizar(factores):")
@@ -105,7 +143,12 @@ def generar_script(modelo: Edificio) -> str:
     w("    ops.reactions()")
     w("    desp = {n: [ops.nodeDisp(t, k) for k in range(1, 7)] for n, t in NODOS.items()}")
     w("    reac = {n: [ops.nodeReaction(NODOS[n], k) for k in range(1, 7)] for n in APOYOS}")
-    w("    return desp, reac")
+    w("    return desp, reac, fuerzas_cascaras()")
+    w("")
+    w("")
+    w("def fuerzas_cascaras():")
+    w("    # Fuerzas que los nodos ejercen sobre cada elemento, ejes globales, 24 valores")
+    w("    return {e: list(ops.eleForce(t)) for e, t in CASCARAS.items()}")
     w("")
     w("")
     w("def modal(n_modos):")
@@ -119,7 +162,15 @@ def generar_script(modelo: Edificio) -> str:
     w("    periodos = [2 * math.pi / math.sqrt(v) for v in lam]")
     w("    formas = [{n: [ops.nodeEigenvector(t, i, k) for k in range(1, 7)] for n, t in NODOS.items()}")
     w("              for i in range(1, len(lam) + 1)]")
-    w("    return periodos, formas")
+    w("    fuerzas = []")
+    w("    if CASCARAS:")
+    w("        # Fuerzas de cada forma modal: se impone la forma como desplazamiento")
+    w("        for forma in formas:")
+    w("            for n, t in NODOS.items():")
+    w("                for k in range(6):")
+    w("                    ops.setNodeDisp(t, k + 1, forma[n][k], '-commit')")
+    w("            fuerzas.append(fuerzas_cascaras())")
+    w("    return periodos, formas, fuerzas")
     w("")
     w("")
     w(f"COMBINACIONES = {json.dumps({c.nombre: c.factores for c in combos}, ensure_ascii=False)}")
@@ -128,14 +179,16 @@ def generar_script(modelo: Edificio) -> str:
     w("    # Uso: python modelo_opensees.py            -> análisis estático de las combinaciones")
     w("    #      python modelo_opensees.py modal 12   -> análisis modal con 12 modos")
     w("    if len(sys.argv) > 1 and sys.argv[1] == 'modal':")
-    w("        T, phi = modal(int(sys.argv[2]) if len(sys.argv) > 2 else 12)")
-    w("        salida = {'periodos': T, 'formas': phi}")
+    w("        T, phi, fz = modal(int(sys.argv[2]) if len(sys.argv) > 2 else 12)")
+    w("        salida = {'periodos': T, 'formas': phi, 'fuerzas_elementos': fz}")
     w("    else:")
-    w("        salida = {'desplazamientos': {}, 'reacciones': {}}")
+    w("        salida = {'desplazamientos': {}, 'reacciones': {}, 'fuerzas_elementos': {}}")
     w("        for nombre, factores in COMBINACIONES.items():")
-    w("            d, r = analizar(factores)")
+    w("            d, r, fz = analizar(factores)")
     w("            salida['desplazamientos'][nombre] = d")
     w("            salida['reacciones'][nombre] = r")
+    w("            if fz:")
+    w("                salida['fuerzas_elementos'][nombre] = fz")
     w(f"    print({_MARCA!r} + json.dumps(salida))")
     return "\n".join(L) + "\n"
 
@@ -160,7 +213,10 @@ def _ejecutar(modelo: Edificio, args: list[str], carpeta, timeout: float) -> dic
 def analizar(modelo: Edificio, carpeta: str | Path | None = None, timeout: float = 600) -> Resultados:
     """Genera el script, lo ejecuta en un proceso aparte y lee los resultados."""
     datos = _ejecutar(modelo, [], carpeta, timeout)
-    return Resultados(motor="opensees", desplazamientos=datos["desplazamientos"], reacciones=datos["reacciones"])
+    return Resultados(
+        motor="opensees", desplazamientos=datos["desplazamientos"], reacciones=datos["reacciones"],
+        fuerzas_elementos=datos["fuerzas_elementos"],
+    )
 
 
 def modal(modelo: Edificio, n_modos: int = 12, carpeta: str | Path | None = None, timeout: float = 600) -> Modos:
@@ -168,4 +224,4 @@ def modal(modelo: Edificio, n_modos: int = 12, carpeta: str | Path | None = None
     if not masas_nodales(modelo):
         raise ValueError("el modelo no tiene masa: define fuente_masa, peso propio o masas nodales")
     datos = _ejecutar(modelo, ["modal", str(n_modos)], carpeta, timeout)
-    return Modos(motor="opensees", periodos=datos["periodos"], formas=datos["formas"])
+    return Modos(motor="opensees", periodos=datos["periodos"], formas=datos["formas"], fuerzas_elementos=datos["fuerzas_elementos"])

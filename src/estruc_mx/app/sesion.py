@@ -118,8 +118,12 @@ class Sesion:
             ["Barras", len(m.barras)],
             ["Columnas", sum(b.tipo == "columna" for b in m.barras)],
             ["Vigas", sum(b.tipo == "viga" for b in m.barras)],
+            ["Muros", sum(a.tipo == "muro" for a in m.areas)],
+            ["Losas", sum(a.tipo == "losa" for a in m.areas)],
             ["Materiales", ", ".join(x.nombre for x in m.materiales)],
             ["Secciones", ", ".join(x.nombre for x in m.secciones)],
+            *([["Secciones de muro y losa", ", ".join(x.nombre for x in m.secciones_area)]] if m.areas else []),
+            *([["Tamaño de malla (m)", m.tamano_malla]] if m.areas else []),
             ["Patrones de carga", ", ".join(p.nombre for p in m.patrones)],
             ["Combinaciones", len(m.combinaciones)],
         ]
@@ -134,10 +138,50 @@ class Sesion:
         if self.estatico is None:
             raise ValueError("primero ejecuta el análisis estático")
         t = Tabla(f"Desplazamientos, {combinacion}", ["Nodo", "X (m)", "Y (m)", "Z (m)", "UX (mm)", "UY (mm)", "UZ (mm)"])
-        coords = {n.id: n for n in self.modelo.nodos}
-        for nid, d in self.estatico.desplazamientos[combinacion].items():
-            n = coords[nid]
-            t.filas.append([nid, n.x, n.y, n.z, *(round(v * 1000, 3) for v in d[:3])])
+        tabla = self.estatico.desplazamientos[combinacion]
+        # Solo los nodos del modelo; los de la malla de muros y losas se ven en la deformada
+        for n in self.modelo.nodos:
+            t.filas.append([n.id, n.x, n.y, n.z, *(round(v * 1000, 3) for v in tabla[n.id][:3])])
+        return t
+
+    def tabla_muros(self, combinacion: str) -> Tabla:
+        from ..analisis.areas import todas_fuerzas_muros
+        from ..modelo.malla import discretizar
+
+        if self.estatico is None:
+            raise ValueError("primero ejecuta el análisis estático")
+        m = self.modelo
+        f = todas_fuerzas_muros(m, discretizar(m), self.estatico.fuerzas_elementos.get(combinacion, {}))
+        t = Tabla(
+            f"Fuerzas en la base de los muros, {combinacion} (kN, kN·m; P > 0 tensión)",
+            ["Muro", "Sección", "Base (m)", "P", "V", "M", "V fuera", "M fuera"],
+        )
+        for a in m.areas:
+            if a.id in f:
+                x = f[a.id]
+                z = min(m.nodo(n).z for n in a.nodos)
+                t.filas.append([a.id, a.seccion, z, *(round(x[c], 2) for c in ("P", "V", "M", "Vfp", "Mfp"))])
+        return t
+
+    def tabla_losas(self, combinacion: str) -> Tabla:
+        from ..analisis.areas import esfuerzos_areas, extremos_esfuerzos
+        from ..modelo.malla import discretizar
+
+        if self.estatico is None:
+            raise ValueError("primero ejecuta el análisis estático")
+        m = self.modelo
+        esf = esfuerzos_areas(m, discretizar(m), self.estatico.desplazamientos[combinacion])
+        t = Tabla(
+            f"Momentos en losas, {combinacion} (kN·m/m; + tensión abajo)",
+            ["Losa", "M11 mín", "M11 máx", "M22 mín", "M22 máx", "|M12| máx"],
+        )
+        for a in m.areas:
+            if a.tipo == "losa":
+                e = extremos_esfuerzos(esf[a.id])
+                t.filas.append([
+                    a.id, *(round(v, 2) for v in (*e["M11"], *e["M22"])),
+                    round(max(abs(v) for v in e["M12"]), 2),
+                ])
         return t
 
     def tabla_reacciones(self, combinacion: str) -> Tabla:
@@ -174,10 +218,24 @@ class Sesion:
             raise ValueError(f"primero ejecuta el análisis espectral en {direccion}")
         t = Tabla(
             f"Espectral {direccion} ({r.metodo}): cortante basal {r.cortante_basal:.1f} kN",
-            ["Nivel (m)", "Deriva", "Columna"],
+            ["Nivel (m)", "Deriva", "Columna o muro"],
         )
         for d in r.derivas:
             t.filas.append([d.nivel, round(d.deriva, 5), d.barra])
+        return t
+
+    def tabla_muros_espectral(self, direccion: str) -> Tabla:
+        r = self.espectrales.get(direccion)
+        if r is None:
+            raise ValueError(f"primero ejecuta el análisis espectral en {direccion}")
+        t = Tabla(
+            f"Fuerzas en muros, espectral {direccion} ({r.metodo}), valores máximos (kN, kN·m)",
+            ["Muro", "P", "V", "M", "V fuera", "M fuera"],
+        )
+        for a in self.modelo.areas:
+            if a.id in r.fuerzas_muros:
+                x = r.fuerzas_muros[a.id]
+                t.filas.append([a.id, *(round(x[c], 2) for c in ("P", "V", "M", "Vfp", "Mfp"))])
         return t
 
     def _exigir_modelo(self) -> None:

@@ -1,6 +1,8 @@
 from .edificio import (
     Apoyo,
+    Area,
     Barra,
+    CargaArea,
     CargaDistribuida,
     CargaNodal,
     Combinacion,
@@ -12,6 +14,7 @@ from .edificio import (
     Nodo,
     PatronCarga,
     Rejilla,
+    SeccionArea,
     SeccionGeneral,
     SeccionRectangular,
 )
@@ -22,6 +25,9 @@ from .masas import masas_nodales
 
 __all__ = [
     "Apoyo",
+    "Area",
+    "CargaArea",
+    "SeccionArea",
     "Barra",
     "CargaDistribuida",
     "CargaNodal",

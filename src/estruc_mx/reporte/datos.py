@@ -77,6 +77,10 @@ def preparar(modelo: Edificio, opciones: Opciones | None = None) -> DatosReporte
         raise ValueError(f"sistema '{op.sistema}' desconocido; opciones: {', '.join(DISTORSIONES_LIMITE)}")
     d = DatosReporte(modelo=modelo, opciones=op)
     motor = _motor(op.motor)
+    if modelo.areas:
+        from ..modelo.malla import discretizar
+
+        d.avisos += discretizar(modelo).avisos
 
     if modelo.patrones:
         d.estatico = motor.analizar(modelo)

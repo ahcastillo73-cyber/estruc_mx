@@ -1,4 +1,6 @@
-"""Resultados comunes a todos los motores, siempre en ejes globales del modelo (Z arriba)."""
+"""Resultados comunes a todos los motores, siempre en ejes globales del modelo (Z arriba).
+
+Los desplazamientos incluyen los nodos generados al dividir muros y losas (modelo/malla.py)."""
 
 from __future__ import annotations
 
@@ -14,6 +16,9 @@ class Resultados:
     desplazamientos: Tabla = field(default_factory=dict)
     # combinación -> nodo -> [FX, FY, FZ, MX, MY, MZ]
     reacciones: Tabla = field(default_factory=dict)
+    # combinación -> elemento de cáscara -> 24 fuerzas que sus 4 nodos ejercen sobre él,
+    # [FX, FY, FZ, MX, MY, MZ] por nodo en ejes globales (ver analisis/areas.py)
+    fuerzas_elementos: Tabla = field(default_factory=dict)
 
     @property
     def combinaciones(self) -> list[str]:
@@ -34,3 +39,5 @@ class Modos:
     periodos: list[float] = field(default_factory=list)
     # por modo: nodo -> [UX, UY, UZ, RX, RY, RZ]
     formas: list[dict[str, list[float]]] = field(default_factory=list)
+    # por modo: elemento de cáscara -> 24 fuerzas nodales de la forma modal (como en Resultados)
+    fuerzas_elementos: list[dict[str, list[float]]] = field(default_factory=list)
