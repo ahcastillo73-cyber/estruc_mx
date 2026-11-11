@@ -8,12 +8,14 @@ Ambos motores (PyNite y OpenSees) analizan exactamente la misma malla, que sale 
 - Los nodos generados que caen en el mismo punto se unen, así dos áreas que comparten un
   borde con la misma longitud comparten sus nodos (un muro con la losa de arriba, dos losas
   vecinas).
-- Las barras que pasan por nodos generados (la viga sobre un muro, la del borde de una losa)
-  se parten en tramos, para que trabajen junto con el área.
+- Las barras que pasan por nodos generados o por esquinas de áreas (la viga sobre un muro, la
+  del borde de una losa) se parten en tramos, para que trabajen junto con el área.
 - Los nodos generados sobre el borde entre dos apoyos iguales heredan ese apoyo (la base de
   un muro empotrado queda empotrada en toda su longitud).
 - Las cargas por m² se reparten a los nodos de cada elemento, una cuarta parte a cada uno
   (exacto para elementos rectangulares).
+- Los diafragmas rígidos agrupan los nodos de cada piso con un maestro en el centro de masa
+  (ver modelo/diafragmas.py).
 """
 
 from __future__ import annotations
@@ -63,6 +65,8 @@ class Malla:
     # área -> matriz (n + 1, m + 1) de ids de nodos
     rejillas: dict[str, list[list[str]]] = field(default_factory=dict)
     avisos: list[str] = field(default_factory=list)
+    # Diafragmas rígidos (modelo/diafragmas.py); sus nodos maestros no están en `nodos`
+    diafragmas: list = field(default_factory=list)
 
     def segmentos_de(self, barra: str) -> list[Segmento]:
         return [s for s in self.segmentos if s.barra == barra]
@@ -137,7 +141,9 @@ def discretizar(modelo: Edificio) -> Malla:
     _avisar_nodos_sueltos(modelo, m)
 
     # --- barras partidas por los nodos generados ---------------------------------------
-    gen = sorted(m.generados)
+    # Nodos generados y esquinas de áreas (p. ej. al dividir un muro, la viga de arriba pasa por
+    # las esquinas nuevas)
+    gen = sorted(m.generados | {n for a in modelo.areas for n in a.nodos})
     G = np.array([m.nodos[g] for g in gen]).reshape(-1, 3)
     for b in modelo.barras:
         a, z = m.nodos[b.i], m.nodos[b.j]
@@ -176,6 +182,10 @@ def discretizar(modelo: Edificio) -> Malla:
             for n in e.nodos:
                 v = tabla.setdefault(n, np.zeros(3))
                 v[g] += c.w * cuarto
+
+    from .diafragmas import diafragmas_de_malla
+
+    m.diafragmas = diafragmas_de_malla(modelo, m)
     return m
 
 

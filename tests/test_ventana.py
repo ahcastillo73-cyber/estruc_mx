@@ -196,3 +196,47 @@ def test_losas_desde_rejilla_y_espectral_con_muros(ventana):
     assert "Muros espectral X" in items(ventana.selector_tabla)
     ventana.selector_tabla.setCurrentText("Muros espectral X")
     assert ventana.tabla.rowCount() == 1
+
+
+def test_replicar_diafragmas_y_editar_muro_desde_la_ventana(ventana):
+    ventana.nuevo_modelo("Pisos", [6.0], [5.0], [3.0, 3.0, 3.0], crear_marco=False, diafragmas=True)
+    m = ventana.sesion.modelo
+    assert [d.nombre for d in m.diafragmas] == ["N1", "N2", "N3"]
+    ed = ventana.sesion.editor
+    ed.marco_desde_rejilla("C40x40", "V25x50", niveles=["N1"])
+    mid = ed.agregar_muro((0, 0), (6, 0), 0.0, 3.0, "Muro tabique 14")
+    ed.asignar_carga_area([mid], "CM", "Y", 1.0)
+
+    # Replicar el primer piso a los otros dos
+    m = ventana.sesion.modelo
+    ventana.seleccionar(barras=[b.id for b in m.barras], areas=[mid])
+    assert ventana._nivel_de_seleccion() == "N1"
+    ventana.hacer_replicar_a_niveles("N1", ["N2", "N3"])
+    m = ventana.sesion.modelo
+    assert len(m.barras) == 3 * 8 and len(m.areas) == 3 and len(m.cargas_area) == 3
+    assert "Replicar de N1" in ventana.registro.toPlainText()
+    ventana.seleccionar(barras=["C1"])
+    ventana.hacer_replicar((6.0, 0.0, 0.0), 2)
+    assert len(ventana.sesion.modelo.barras) == 25  # en x = 6 ya había columna; solo x = 12 es nueva
+
+    # Editar la geometría del muro desde el panel de propiedades
+    ventana.seleccionar(areas=[mid])
+    assert "muro_x2" in ventana.controles_propiedades
+    ventana.aplicar_propiedad("muro_z1", "6")
+    assert {ventana.sesion.modelo.nodo(n).z for n in ventana.sesion.modelo.area(mid).nodos} == {0.0, 6.0}
+    ventana.aplicar_propiedad("muro_z1", "3")
+    ventana.hacer_dividir(mid, 2)
+    assert len(ventana.sel_areas) == 2
+
+    # Diafragmas: tabla con el centro de masa y desplazamiento del centro en la tabla
+    ventana.hacer_diafragmas(["N1", "N2"])
+    assert [d.nombre for d in ventana.sesion.modelo.diafragmas] == ["N1", "N2"]
+    assert "Diafragmas" in items(ventana.selector_tabla)
+    ventana.selector_tabla.setCurrentText("Diafragmas")
+    assert ventana.tabla.rowCount() == 2
+    ventana.ejecutar_estatico()
+    assert ventana.tabla.rowCount() == len(ventana.sesion.modelo.nodos) + 2
+
+    # Las cargas de cada patrón aparecen en «Ver»
+    assert {"Cargas: CM", "Cargas: CV"} <= set(items(ventana.selector_vista))
+    assert ventana.tabla_de_vista("Cargas: CM") is None

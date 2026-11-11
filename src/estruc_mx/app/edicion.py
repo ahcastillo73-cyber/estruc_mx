@@ -45,6 +45,23 @@ _TITULOS_DEFINIR = {
 }
 
 
+_CAMPOS_MURO = ("muro_x1", "muro_y1", "muro_x2", "muro_y2", "muro_z0", "muro_z1")
+_ETIQUETAS_MURO = ("X inicio (m)", "Y inicio (m)", "X fin (m)", "Y fin (m)", "Z base (m)", "Z corona (m)")
+
+
+def geometria_muro(modelo, area) -> tuple[float, ...] | None:
+    """(x1, y1, x2, y2, z base, z corona) de un muro vertical rectangular; None si no lo es."""
+    if area.tipo != "muro":
+        return None
+    c = modelo.esquinas(area)
+    (a, b, d, e) = c
+    vertical = all(math.isclose(p[0], q[0], abs_tol=TOLERANCIA) and math.isclose(p[1], q[1], abs_tol=TOLERANCIA) for p, q in ((a, e), (b, d)))
+    plano = math.isclose(a[2], b[2], abs_tol=TOLERANCIA) and math.isclose(d[2], e[2], abs_tol=TOLERANCIA)
+    if not (vertical and plano and a[2] < e[2]):
+        return None
+    return (float(a[0]), float(a[1]), float(b[0]), float(b[1]), float(a[2]), float(e[2]))
+
+
 def nombre_apoyo(restricciones) -> str:
     for nombre, r in APOYOS.items():
         if r is not None and tuple(restricciones) == r:
@@ -98,6 +115,9 @@ class EdicionMixin:
         self.accion_borrar = accion("Borrar selección", self.borrar_seleccion, QKeySequence.Delete, menu_editar)
         self.accion_sel_todo = accion("Seleccionar todo", self.seleccionar_todo, QKeySequence.SelectAll, menu_editar)
         self.accion_sel_nada = accion("Quitar selección", lambda: self.seleccionar(), None, menu_editar)
+        menu_editar.addSeparator()
+        self.accion_replicar = accion("Replicar selección…", self._dialogo_replicar, "Ctrl+R", menu_editar)
+        self.accion_dividir = accion("Dividir muro o losa…", self._dialogo_dividir, None, menu_editar)
 
         menu_def = mb.addMenu("&Definir")
         self.accion_rejilla = accion("Rejilla (ejes y niveles)…", self._dialogo_rejilla, None, menu_def)
@@ -132,6 +152,8 @@ class EdicionMixin:
         menu_asig.addSeparator()
         self.accion_seccion_area = accion("Sección a muros y losas…", self._dialogo_seccion_area, None, menu_asig)
         self.accion_carga_area = accion("Carga en muros y losas…", self._dialogo_carga_area, None, menu_asig)
+        menu_asig.addSeparator()
+        self.accion_diafragmas = accion("Diafragmas rígidos por nivel…", self._dialogo_diafragmas, None, menu_asig)
 
         # Barra de herramientas de dibujo
         barra = QToolBar("Dibujo", self)
@@ -162,7 +184,8 @@ class EdicionMixin:
             *self.acciones_definir.values(), self.accion_masa, self.accion_espectro, *self.acciones_modo.values(),
             self.accion_nodo, self.accion_barra_sel, self.accion_marco, self.accion_apoyo, self.accion_carga_nodal,
             self.accion_seccion, self.accion_carga_dist, self.accion_malla, self.accion_losas,
-            self.accion_seccion_area, self.accion_carga_area,
+            self.accion_seccion_area, self.accion_carga_area, self.accion_replicar, self.accion_dividir,
+            self.accion_diafragmas,
         ]
 
     # --- cambios del modelo -------------------------------------------------------
@@ -249,6 +272,8 @@ class EdicionMixin:
             if a:
                 texto += f", {a} muro{'s' * (a != 1)} o losa{'s' * (a != 1)}"
             self.statusBar().showMessage(texto)
+        elif self.statusBar().currentMessage().startswith("Seleccionados:"):
+            self.statusBar().clearMessage()
 
     def clic(self, objetivo: tuple[str, object] | None, aditivo: bool = False) -> None:
         """Clic en la vista: ("nodo", id), ("barra", id), ("area", id), ("punto", (x, y, z)) o None."""
@@ -456,6 +481,10 @@ class EdicionMixin:
             form.addRow("Área (m²)", QLabel(f"{m.superficie(a):.3f}"))
             s = m.seccion_area(a.seccion)
             form.addRow("Espesor (m)", QLabel(f"{s.espesor:g}"))
+            geo = geometria_muro(m, a)
+            if geo is not None:
+                for campo, etiqueta, valor in zip(_CAMPOS_MURO, _ETIQUETAS_MURO, geo):
+                    self._fila_texto(form, campo, etiqueta, f"{valor:g}")
             cargas = [f"{c.patron}: w{c.direccion} = {c.w:g} kN/m²" for c in m.cargas_area if c.area == a.id]
             form.addRow("Cargas", QLabel("\n".join(cargas) or "ninguna"))
         elif self.sel_nodos or self.sel_barras or self.sel_areas:
@@ -530,6 +559,14 @@ class EdicionMixin:
                     ed.editar_area(aid, id=valor)
                     self.sel_areas = {valor}
                     self._modelo_cambiado()
+                elif campo in _CAMPOS_MURO:
+                    geo = list(geometria_muro(m, m.area(aid)))
+                    k = _CAMPOS_MURO.index(campo)
+                    nuevo = dfn._float(valor)
+                    if not math.isclose(nuevo, geo[k], abs_tol=TOLERANCIA):
+                        geo[k] = nuevo
+                        x1, y1, x2, y2, z0, z1 = geo
+                        ed.editar_muro(aid, (x1, y1), (x2, y2), z0, z1)
             elif len(self.sel_nodos) == 1 and not self.sel_barras:
                 nid = next(iter(self.sel_nodos))
                 n = m.nodo(nid)
@@ -559,9 +596,14 @@ class EdicionMixin:
             self._actualizar_propiedades()
 
     # --- archivo nuevo -------------------------------------------------------------
-    def nuevo_modelo(self, nombre: str, claros_x: list[float], claros_y: list[float], alturas: list[float], crear_marco: bool = True) -> None:
+    def nuevo_modelo(
+        self, nombre: str, claros_x: list[float], claros_y: list[float], alturas: list[float],
+        crear_marco: bool = True, diafragmas: bool = False,
+    ) -> None:
         rejilla = Rejilla.regular(claros_x, claros_y, alturas)
         self.sesion.nuevo(nombre, rejilla)
+        if diafragmas:
+            self.sesion.editor.asignar_diafragmas([nv.nombre for nv in rejilla.niveles[1:]])
         if crear_marco:
             m = self.sesion.modelo
             n = self.sesion.editor.marco_desde_rejilla(m.secciones[0].nombre, m.secciones[1].nombre)
@@ -582,6 +624,7 @@ class EdicionMixin:
                 Campo("y", "Claros en Y (m)", "2x5"),
                 Campo("h", "Alturas de entrepiso (m)", "3.5, 2x3"),
                 Campo("marco", "Crear columnas, vigas y apoyos", True),
+                Campo("diafragmas", "Diafragma rígido en cada nivel", True),
             ],
             self,
             nota="Se crea la rejilla de ejes y niveles. Material, secciones, patrones y combinaciones "
@@ -591,7 +634,7 @@ class EdicionMixin:
             return
         v = d.valores()
         try:
-            self.nuevo_modelo(v["nombre"] or "Edificio", dfn.leer_lista(v["x"]), dfn.leer_lista(v["y"]), dfn.leer_lista(v["h"]), v["marco"])
+            self.nuevo_modelo(v["nombre"] or "Edificio", dfn.leer_lista(v["x"]), dfn.leer_lista(v["y"]), dfn.leer_lista(v["h"]), v["marco"], v["diafragmas"])
         except ValueError as e:
             self._error(f"No se pudo crear el modelo:\n{e}")
 
@@ -711,7 +754,118 @@ class EdicionMixin:
             if n is not None:
                 self.log(f"Marco desde rejilla: {n} barras nuevas")
 
+    # --- Replicar y dividir --------------------------------------------------------------
+    def _dialogo_replicar(self) -> None:
+        if not (self.sel_nodos or self.sel_barras or self.sel_areas):
+            return self._error("Selecciona primero lo que quieres replicar.")
+        m = self.sesion.modelo
+        niveles = [nv.nombre for nv in m.rejilla.niveles] if m.rejilla else []
+        campos = [Campo("modo", "Modo", "A niveles" if niveles else "Lineal", ["A niveles", "Lineal"] if niveles else ["Lineal"])]
+        if niveles:
+            origen = self._nivel_de_seleccion() or niveles[min(1, len(niveles) - 1)]
+            campos.append(Campo("origen", "Nivel de origen", origen, niveles))
+            campos += [Campo(f"nv:{n}", f"Copiar a {n}", False) for n in niveles]
+        campos += [
+            Campo("dx", "dX (m)", 0.0), Campo("dy", "dY (m)", 0.0), Campo("dz", "dZ (m)", 0.0),
+            Campo("veces", "Número de copias", 1.0),
+            Campo("cargas", "Copiar cargas, apoyos y masas", True),
+        ]
+        d = DialogoFormulario(
+            "Replicar selección", campos, self,
+            nota="A niveles: copia lo seleccionado del nivel de origen a los niveles marcados (solo cambia Z). "
+            "Lineal: copia «Número de copias» veces, desplazando dX, dY, dZ cada vez. "
+            "Lo que ya existe en el destino no se duplica.",
+        )
+        if d.exec() != QDialog.Accepted:
+            return
+        v = d.valores()
+        if v["modo"] == "A niveles":
+            destinos = [n for n in niveles if v.get(f"nv:{n}")]
+            self.hacer_replicar_a_niveles(v["origen"], destinos, v["cargas"])
+        else:
+            self.hacer_replicar((v["dx"], v["dy"], v["dz"]), int(round(v["veces"])), v["cargas"])
+
+    def _nivel_de_seleccion(self) -> str | None:
+        """Nivel de la rejilla donde está lo más alto de la selección (para proponer el origen)."""
+        m = self.sesion.modelo
+        zs = [m.nodo(n).z for n in self.sel_nodos]
+        zs += [max(m.nodo(b.i).z, m.nodo(b.j).z) for b in m.barras if b.id in self.sel_barras]
+        zs += [max(m.nodo(n).z for n in a.nodos) for a in m.areas if a.id in self.sel_areas]
+        if not zs or m.rejilla is None:
+            return None
+        z = max(zs)
+        return next((nv.nombre for nv in m.rejilla.niveles if math.isclose(nv.z, z, abs_tol=TOLERANCIA)), None)
+
+    def hacer_replicar(self, paso: tuple[float, float, float], veces: int = 1, con_cargas: bool = True) -> None:
+        if veces < 1:
+            return self._error("El número de copias debe ser al menos 1.")
+        desplazamientos = [tuple(k * v for v in paso) for k in range(1, veces + 1)]
+        n = self.editar(self.sesion.editor.replicar, desplazamientos, self.sel_nodos, self.sel_barras, self.sel_areas, con_cargas)
+        if n is not None:
+            self.log(f"Replicar: {n['nodos']} nodos, {n['barras']} barras y {n['areas']} muros o losas nuevos")
+
+    def hacer_replicar_a_niveles(self, origen: str, destinos: list[str], con_cargas: bool = True) -> None:
+        destinos = [d for d in destinos if d != origen]
+        if not destinos:
+            return self._error("Marca al menos un nivel de destino distinto del de origen.")
+        n = self.editar(self.sesion.editor.replicar_a_niveles, origen, destinos, self.sel_nodos, self.sel_barras, self.sel_areas, con_cargas)
+        if n is not None:
+            self.log(f"Replicar de {origen} a {', '.join(destinos)}: {n['nodos']} nodos, {n['barras']} barras y {n['areas']} muros o losas nuevos")
+
+    def _dialogo_dividir(self) -> None:
+        if len(self.sel_areas) != 1:
+            return self._error("Selecciona un solo muro o losa.")
+        aid = next(iter(self.sel_areas))
+        a = self.sesion.modelo.area(aid)
+        muro = a.tipo == "muro"
+        d = DialogoFormulario(
+            f"Dividir {aid}",
+            [
+                Campo("n1", "Partes a lo largo" if muro else "Partes en la dirección 1", 2.0),
+                Campo("n2", "Partes a lo alto" if muro else "Partes en la dirección 2", 1.0),
+            ],
+            self,
+            nota="Las piezas conservan la sección y las cargas. Sirve para abrir huecos (borrando una pieza) "
+            "o para que el área se una con nodos intermedios.",
+        )
+        if d.exec() == QDialog.Accepted:
+            v = d.valores()
+            self.hacer_dividir(aid, int(round(v["n1"])), int(round(v["n2"])))
+
+    def hacer_dividir(self, area: str, partes_1: int, partes_2: int = 1) -> None:
+        ids = self.editar(self.sesion.editor.dividir_area, area, partes_1, partes_2)
+        if ids:
+            self.seleccionar(areas=ids)
+            self.log(f"{area} dividido en {len(ids)} partes: {', '.join(ids)}")
+
     # --- Asignar --------------------------------------------------------------------
+    def _dialogo_diafragmas(self) -> None:
+        m = self.sesion.modelo
+        if m.rejilla is None or len(m.rejilla.niveles) < 2:
+            return self._error("Hace falta una rejilla con niveles (Definir > Rejilla).")
+        actuales = {d.nombre for d in m.diafragmas}
+        niveles = m.rejilla.niveles[1:]
+        d = DialogoFormulario(
+            "Diafragmas rígidos",
+            [Campo(nv.nombre, f"{nv.nombre} (z = {nv.z:g} m)", nv.nombre in actuales or not actuales) for nv in niveles],
+            self,
+            nota="Cada nivel marcado se mueve como cuerpo rígido en su plano (X, Y y giro): todos sus nodos, "
+            "incluidos los de la malla de las losas. El nodo maestro va en el centro de masa del nivel. "
+            "La flexión de las losas fuera de su plano no cambia.",
+        )
+        if d.exec() == QDialog.Accepted:
+            v = d.valores()
+            self.hacer_diafragmas([nv.nombre for nv in niveles if v[nv.nombre]])
+
+    def hacer_diafragmas(self, niveles: list[str]) -> None:
+        """Deja diafragma rígido exactamente en los niveles indicados."""
+        try:
+            self.sesion.editor.asignar_diafragmas(niveles, solo_estos=True)
+        except (ValueError, KeyError) as e:
+            return self._error(f"No se pudo editar el modelo:\n{e}")
+        self.log(f"Diafragmas rígidos en: {', '.join(niveles) or 'ningún nivel'}")
+
+
     def _exigir(self, nodos: bool = False, barras: bool = False, areas: bool = False) -> bool:
         if nodos and not self.sel_nodos:
             self._error("Selecciona uno o más nodos primero.")

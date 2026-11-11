@@ -32,6 +32,7 @@ from .edicion import EdicionMixin
 from .sesion import MOTORES, Sesion, Tabla
 
 _VISTA_MODELO = "Modelo sin deformar"
+_PREFIJO_CARGAS = "Cargas: "
 
 
 class _Senales(QObject):
@@ -286,6 +287,8 @@ class VentanaPrincipal(EdicionMixin, QMainWindow):
         nombres = []
         if s.modelo is not None:
             nombres.append("Modelo")
+            if s.modelo.diafragmas:
+                nombres.append("Diafragmas")
         hay_muros = s.modelo is not None and any(a.tipo == "muro" for a in s.modelo.areas)
         hay_losas = s.modelo is not None and any(a.tipo == "losa" for a in s.modelo.areas)
         if s.estatico is not None:
@@ -309,6 +312,8 @@ class VentanaPrincipal(EdicionMixin, QMainWindow):
         s = self.sesion
         if nombre == "Modelo" and s.modelo is not None:
             return s.resumen()
+        if nombre == "Diafragmas" and s.modelo is not None:
+            return s.tabla_diafragmas()
         if nombre in ("Desplazamientos", "Reacciones", "Fuerzas en muros", "Momentos en losas") and s.estatico is not None:
             combo = self._combinacion_actual()
             return {
@@ -347,6 +352,8 @@ class VentanaPrincipal(EdicionMixin, QMainWindow):
     def _opciones_vista(self) -> list[str]:
         s = self.sesion
         opciones = [_VISTA_MODELO]
+        if s.modelo is not None:
+            opciones += [f"{_PREFIJO_CARGAS}{p.nombre}" for p in s.modelo.patrones]
         if s.estatico is not None:
             opciones += s.estatico.combinaciones
         if s.modos is not None:
@@ -425,7 +432,12 @@ class VentanaPrincipal(EdicionMixin, QMainWindow):
             if lineas is not None:
                 self.plotter.add_mesh(lineas, scalars="desplazamiento", line_width=4, cmap="viridis",
                                       scalar_bar_args=barra, pickable=False)
-        self.plotter.add_text(f"{modelo.nombre} - {opcion}", font_size=9, color="black", name="titulo")
+        if tabla is None:
+            self._dibujar_diafragmas()
+        titulo = f"{modelo.nombre} - {opcion}"
+        if opcion.startswith(_PREFIJO_CARGAS):
+            titulo += self._dibujar_cargas(opcion.removeprefix(_PREFIJO_CARGAS))
+        self.plotter.add_text(titulo, font_size=9, color="black", name="titulo")
         self.plotter.show_axes()
         self._dibujar_seleccion(render=False)
         if camara is None:
@@ -433,6 +445,41 @@ class VentanaPrincipal(EdicionMixin, QMainWindow):
         else:
             self.plotter.camera_position = camara
         self.plotter.render()
+
+    def _dibujar_cargas(self, patron: str) -> str:
+        """Flechas de las cargas del patrón; devuelve una nota para el título."""
+        from ..visual.vista3d import COLORES_CARGA, flechas_cargas, malla_flechas
+
+        m = self.sesion.modelo
+        nota = ""
+        for clave, fl in flechas_cargas(m, patron).items():
+            malla = malla_flechas(fl)
+            if malla is None:
+                continue
+            self.plotter.add_mesh(malla, color=COLORES_CARGA[clave], pickable=False)
+            if fl.textos:
+                self.plotter.add_point_labels(
+                    fl.posiciones, fl.textos, font_size=10, text_color=COLORES_CARGA[clave], shape_opacity=0.0,
+                    show_points=False, always_visible=True, pickable=False,
+                )
+        p = next((p for p in m.patrones if p.nombre == patron), None)
+        if p is not None and p.peso_propio:
+            nota = f" (más {p.peso_propio:g} × peso propio)"
+        return nota
+
+    def _dibujar_diafragmas(self) -> None:
+        """Centro de masa de cada diafragma rígido, con su nombre."""
+        import pyvista as pv
+
+        diafragmas = self._malla().diafragmas
+        if not diafragmas:
+            return
+        pts = np.array([d.centro for d in diafragmas], dtype=float)
+        self.plotter.add_mesh(pv.PolyData(pts), color="#7d3c98", point_size=15, render_points_as_spheres=True, pickable=False)
+        self.plotter.add_point_labels(
+            pts, [f"CM {d.nombre}" for d in diafragmas], font_size=10, text_color="#7d3c98", shape_opacity=0.0,
+            show_points=False, always_visible=True, pickable=False,
+        )
 
     def _malla(self):
         """Malla de análisis del modelo actual (se recalcula solo si el modelo cambió)."""

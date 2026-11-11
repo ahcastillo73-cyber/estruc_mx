@@ -87,6 +87,21 @@ def modelo(d: DatosReporte) -> list[Bloque]:
             "de cuatro nodos. El módulo de cortante es G = E/(2(1 + ν)); para mampostería las NTC indican "
             "G = 0.2·Em, que este modelo isótropo no reproduce.", "nota",
         ))
+    if m.diafragmas:
+        from ..modelo.malla import discretizar
+
+        diaf = discretizar(m).diafragmas
+        b.append(Titulo("Diafragmas rígidos", 2))
+        b.append(Tabla(
+            ["Diafragma", "Z (m)", "Masa (t)", "X CM (m)", "Y CM (m)", "Nodos"],
+            [[x.nombre, _f(x.z), _f(x.masa), _f(float(x.centro[0]), 3), _f(float(x.centro[1]), 3), str(len(x.esclavos))] for x in diaf],
+            titulo="Diafragmas rígidos y centros de masa", texto={0},
+        ))
+        b.append(Parrafo(
+            "En cada diafragma todos los nodos del nivel se mueven como cuerpo rígido en su plano "
+            "(X, Y y giro alrededor de Z), con el nodo maestro en el centro de masa. La flexión de las "
+            "losas fuera de su plano no cambia.", "nota",
+        ))
     return b
 
 
