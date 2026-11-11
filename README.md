@@ -14,7 +14,7 @@ Estado: **fase 0, prueba de concepto**. El plan completo está en el documento d
 
 ## Requisitos
 
-Python 3.12 o posterior: OpenSeesPy 3.8, la primera versión con binarios para Windows, Linux y macOS con chip M, no se publica para versiones anteriores.
+Python 3.12 o posterior: OpenSeesPy 3.8, la primera versión con binarios para Windows, Linux y macOS con chip M, no se publica para versiones anteriores. En Windows el motor OpenSees funciona solo con Python 3.12, porque su binario está compilado contra esa versión; en Linux y macOS también funciona con 3.13. Los instaladores incluirán Python 3.12.
 
 ## Convenciones
 

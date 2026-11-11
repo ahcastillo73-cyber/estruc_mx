@@ -33,6 +33,11 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
         python: ["3.12", "3.13"]
+        # El binario de openseespywin 3.8 enlaza python312.dll: en Windows solo
+        # funciona con Python 3.12. Los instaladores usarán 3.12 en los tres sistemas.
+        exclude:
+          - os: windows-latest
+            python: "3.13"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
