@@ -25,6 +25,7 @@
       "h": 0.6
     }
   ],
+  "secciones_area": [],
   "nodos": [
     {
       "id": "N0-0-0",
@@ -485,6 +486,7 @@
       "rotacion": 0.0
     }
   ],
+  "areas": [],
   "apoyos": [
     {
       "nodo": "N0-0-0",
@@ -556,15 +558,18 @@
   "patrones": [
     {
       "nombre": "CM",
-      "tipo": "muerta"
+      "tipo": "muerta",
+      "peso_propio": 0.0
     },
     {
       "nombre": "SX",
-      "tipo": "sismo"
+      "tipo": "sismo",
+      "peso_propio": 0.0
     },
     {
       "nombre": "SY",
-      "tipo": "sismo"
+      "tipo": "sismo",
+      "peso_propio": 0.0
     }
   ],
   "cargas_nodales": [
@@ -769,6 +774,7 @@
       "w": -20.0
     }
   ],
+  "cargas_area": [],
   "combinaciones": [
     {
       "nombre": "CM",
@@ -806,5 +812,7 @@
     "k": 1.0,
     "beta": 1.0,
     "reduccion": 1.0
-  }
+  },
+  "tamano_malla": 1.0,
+  "rejilla": null
 }

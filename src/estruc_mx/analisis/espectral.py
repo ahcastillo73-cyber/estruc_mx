@@ -14,8 +14,10 @@ from typing import Literal
 import numpy as np
 
 from ..modelo import Edificio, masas_nodales
+from ..modelo.malla import Malla, discretizar
 from ..modelo.masas import G
 from ..motores import Modos
+from .areas import COMPONENTES_MURO, bases_muros, fuerzas_muro
 
 _GDL = {"X": 0, "Y": 1, "Z": 2}
 
@@ -33,8 +35,8 @@ class PropiedadesModales:
         return list(np.cumsum(self.fraccion_masa[direccion]))
 
 
-def propiedades_modales(modelo: Edificio, modos: Modos) -> PropiedadesModales:
-    masas = masas_nodales(modelo)
+def propiedades_modales(modelo: Edificio, modos: Modos, malla: Malla | None = None) -> PropiedadesModales:
+    masas = masas_nodales(modelo, malla)
     mtot = sum(masas.values())
     prop = PropiedadesModales(periodos=list(modos.periodos), masa_total=mtot)
     for d, g in _GDL.items():
@@ -71,7 +73,7 @@ def _combinar(valores: np.ndarray, rho: np.ndarray | None) -> np.ndarray:
 class Deriva:
     nivel: float  # elevación del extremo superior, m
     deriva: float  # desplazamiento relativo / altura
-    barra: str
+    barra: str  # columna o muro donde ocurre
 
 
 @dataclass
@@ -84,6 +86,8 @@ class RespuestaEspectral:
     cortante_basal: float  # kN
     cortante_basal_modal: list[float]
     derivas: list[Deriva]  # la máxima por nivel, de abajo hacia arriba
+    # muro -> P, V, M, Vfp, Mfp, T combinados (valores positivos), en la base de cada muro
+    fuerzas_muros: dict[str, dict[str, float]] = field(default_factory=dict)
 
 
 def espectral(
@@ -97,7 +101,8 @@ def espectral(
     espectro = espectro or modelo.espectro
     if espectro is None:
         raise ValueError("el modelo no tiene espectro definido")
-    prop = propiedades_modales(modelo, modos)
+    malla = discretizar(modelo)
+    prop = propiedades_modales(modelo, modos, malla)
     validos = [i for i, T in enumerate(modos.periodos) if math.isfinite(T) and T > 0]
     T = [modos.periodos[i] for i in validos]
     gamma = [prop.participacion[direccion][i] for i in validos]
@@ -105,7 +110,7 @@ def espectral(
 
     # Desplazamiento modal: Γ · Sa·g / ω²
     amp = np.array([g * s * G / (2 * math.pi / t) ** 2 for g, s, t in zip(gamma, sa, T)])
-    nodos = [n.id for n in modelo.nodos]
+    nodos = list(malla.nodos)
     phi = np.array([[modos.formas[i][n] for n in nodos] for i in validos])  # (modos, nodos, 6)
     u_modal = phi * amp[:, None, None]
     rho = coeficientes_cqc(T, amortiguamiento) if metodo == "CQC" else None
@@ -117,19 +122,23 @@ def espectral(
     g = _GDL[direccion]
     por_nivel: dict[float, Deriva] = {}
     indice = {n: k for k, n in enumerate(nodos)}
-    for b in modelo.barras:
-        if b.tipo != "columna":
-            continue
-        ni, nj = modelo.nodo(b.i), modelo.nodo(b.j)
-        abajo, arriba = (ni, nj) if nj.z > ni.z else (nj, ni)
+    for elemento, abajo, arriba in elementos_verticales(modelo):
         h = arriba.z - abajo.z
-        if h <= 0:
-            continue
         rel = (u_modal[:, indice[arriba.id], g] - u_modal[:, indice[abajo.id], g]) / h
         valor = float(_combinar(rel[:, None], rho)[0])
         nivel = round(arriba.z, 6)
         if nivel not in por_nivel or valor > por_nivel[nivel].deriva:
-            por_nivel[nivel] = Deriva(nivel=nivel, deriva=valor, barra=b.id)
+            por_nivel[nivel] = Deriva(nivel=nivel, deriva=valor, barra=elemento)
+
+    fuerzas_muros: dict[str, dict[str, float]] = {}
+    if modos.fuerzas_elementos:
+        for area, base in bases_muros(modelo, malla).items():
+            por_modo = np.array([
+                [fuerzas_muro(base, malla, modos.fuerzas_elementos[i])[c] * a for c in COMPONENTES_MURO]
+                for i, a in zip(validos, amp)
+            ])
+            comb = _combinar(por_modo, rho)
+            fuerzas_muros[area] = {c: float(v) for c, v in zip(COMPONENTES_MURO, comb)}
 
     return RespuestaEspectral(
         direccion=direccion,
@@ -140,4 +149,28 @@ def espectral(
         cortante_basal=V,
         cortante_basal_modal=[float(v) for v in V_modal],
         derivas=[por_nivel[z] for z in sorted(por_nivel)],
+        fuerzas_muros=fuerzas_muros,
     )
+
+
+def elementos_verticales(modelo: Edificio):
+    """(id, nodo de abajo, nodo de arriba) de cada columna y de cada borde vertical de muro,
+    para medir la distorsión de entrepiso."""
+    out = []
+    for b in modelo.barras:
+        if b.tipo != "columna":
+            continue
+        ni, nj = modelo.nodo(b.i), modelo.nodo(b.j)
+        abajo, arriba = (ni, nj) if nj.z > ni.z else (nj, ni)
+        if arriba.z - abajo.z > 0:
+            out.append((b.id, abajo, arriba))
+    for a in modelo.areas:
+        if a.tipo != "muro":
+            continue
+        nodos = [modelo.nodo(n) for n in a.nodos]
+        for k in range(4):
+            p, q = nodos[k], nodos[(k + 1) % 4]
+            if abs(p.x - q.x) < 1e-6 and abs(p.y - q.y) < 1e-6 and abs(p.z - q.z) > 1e-6:
+                abajo, arriba = (p, q) if q.z > p.z else (q, p)
+                out.append((a.id, abajo, arriba))
+    return out

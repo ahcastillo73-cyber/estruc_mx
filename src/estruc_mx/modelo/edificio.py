@@ -3,6 +3,9 @@
 Unidades: kN, m, s. Los esfuerzos y módulos van en kPa (kN/m²).
 Ejes globales: X y Y horizontales, Z vertical hacia arriba (convención tipo ETABS).
 
+Muros y losas (`Area`) son cuadriláteros planos de cuatro nodos, dados en orden alrededor del
+perímetro. Los motores los dividen en elementos de cáscara (ver modelo/malla.py).
+
 Ejes locales de una barra (1, 2, 3 en ETABS; x, y, z aquí):
 - x va del nodo i al nodo j.
 - Barras no verticales: z es horizontal y perpendicular a x; y tiene componente hacia arriba.
@@ -73,6 +76,20 @@ class SeccionGeneral(_SeccionBase):
 Seccion = Annotated[Union[SeccionRectangular, SeccionGeneral], Field(discriminator="forma")]
 
 
+class SeccionArea(BaseModel):
+    """Sección de muro o losa: material y espesor. Se analiza como cáscara elástica
+    (membrana más placa)."""
+
+    nombre: str
+    material: str
+    tipo: Literal["muro", "losa"] = "muro"
+    espesor: float = Field(gt=0, description="m")
+    mod_rigidez: float = Field(
+        1.0, gt=0, le=1.0,
+        description="Multiplica E en membrana y flexión, p. ej. 0.5 para muros agrietados (NTC Concreto)",
+    )
+
+
 class Nodo(BaseModel):
     id: str
     x: float
@@ -101,9 +118,21 @@ class Barra(BaseModel):
     rotacion: float = 0.0
 
 
+class Area(BaseModel):
+    """Muro o losa: cuadrilátero plano con los nodos en orden alrededor del perímetro."""
+
+    id: str
+    tipo: Literal["muro", "losa"] = "muro"
+    nodos: tuple[str, str, str, str]
+    seccion: str
+
+
 class PatronCarga(BaseModel):
     nombre: str
     tipo: Literal["muerta", "viva", "sismo", "viento", "otra"] = "otra"
+    peso_propio: float = Field(
+        0.0, ge=0, description="Multiplicador del peso propio de barras, muros y losas que se aplica en este patrón"
+    )
 
 
 class CargaNodal(BaseModel):
@@ -121,6 +150,15 @@ class CargaDistribuida(BaseModel):
     barra: str
     direccion: Literal["X", "Y", "Z"]
     w: float = Field(description="kN/m; negativo en Z es gravedad")
+
+
+class CargaArea(BaseModel):
+    """Carga uniforme por m² de superficie de un muro o losa, en dirección global."""
+
+    patron: str
+    area: str
+    direccion: Literal["X", "Y", "Z"] = "Z"
+    w: float = Field(description="kN/m²; negativo en Z es gravedad")
 
 
 class MasaNodal(BaseModel):
@@ -192,6 +230,41 @@ class Rejilla(BaseModel):
         ]
 
 
+def ejes_de_plano(c: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Ejes (1, 2, 3) de un cuadrilátero de esquinas c (4, 3); ver `Edificio.ejes_area`."""
+    n = np.cross(c[2] - c[0], c[3] - c[1])
+    n /= np.linalg.norm(n)
+    Z = np.array([0.0, 0.0, 1.0])
+    if abs(n[2]) > 0.999:  # horizontal
+        e3 = n if n[2] > 0 else -n
+        e1 = np.array([1.0, 0.0, 0.0])
+    else:
+        e1 = np.cross(Z, n)
+        e1 /= np.linalg.norm(e1)
+        e3 = n
+    e1 = e1 - np.dot(e1, e3) * e3
+    e1 /= np.linalg.norm(e1)
+    e2 = np.cross(e3, e1)
+    return e1, e2, e3
+
+
+def _revisar_cuadrilatero(c: np.ndarray, tol_alabeo: float = 1e-3) -> str | None:
+    """Mensaje si el cuadrilátero no es plano, es degenerado o no es convexo; None si está bien."""
+    n = np.cross(c[2] - c[0], c[3] - c[1])
+    a = np.linalg.norm(n)
+    if a < 1e-9:
+        return "superficie nula o los nodos no siguen el perímetro"
+    n /= a
+    tam = max(np.linalg.norm(c[k] - c[k - 1]) for k in range(4))
+    if np.abs((c - c.mean(axis=0)) @ n).max() > tol_alabeo * tam:
+        return "los cuatro nodos no están en un plano"
+    for k in range(4):
+        giro = np.dot(np.cross(c[(k + 1) % 4] - c[k], c[(k + 2) % 4] - c[(k + 1) % 4]), n)
+        if giro <= 1e-9 * tam**2:
+            return "no es convexo o los nodos no siguen el perímetro"
+    return None
+
+
 def _letra(k: int) -> str:
     """0 -> A, 25 -> Z, 26 -> AA…"""
     s = ""
@@ -206,18 +279,23 @@ class Edificio(BaseModel):
     nombre: str
     materiales: list[Material] = []
     secciones: list[Seccion] = []
+    secciones_area: list[SeccionArea] = []
     nodos: list[Nodo] = []
     barras: list[Barra] = []
+    areas: list[Area] = []
     apoyos: list[Apoyo] = []
     patrones: list[PatronCarga] = []
     cargas_nodales: list[CargaNodal] = []
     cargas_distribuidas: list[CargaDistribuida] = []
+    cargas_area: list[CargaArea] = []
     combinaciones: list[Combinacion] = []
     # Masa para análisis dinámico (ver modelo/masas.py)
     fuente_masa: dict[str, float] = Field(default_factory=dict, description="patrón -> factor")
     peso_propio_en_masa: bool = True
     masas_nodales: list[MasaNodal] = []
     espectro: Espectro | None = None
+    # Tamaño máximo de los elementos de cáscara en que se dividen muros y losas
+    tamano_malla: float = Field(1.0, gt=0, description="m")
     # Solo para dibujar en la ventana; no entra en el análisis
     rejilla: Rejilla | None = None
 
@@ -234,15 +312,22 @@ class Edificio(BaseModel):
     def barra(self, id_: str) -> Barra:
         return _buscar(self.barras, "id", id_, "barra")
 
+    def seccion_area(self, nombre: str) -> SeccionArea:
+        return _buscar(self.secciones_area, "nombre", nombre, "sección de área")
+
+    def area(self, id_: str) -> Area:
+        return _buscar(self.areas, "id", id_, "área")
+
     # --- validación de referencias ----------------------------------------
     @model_validator(mode="after")
     def _validar_referencias(self) -> "Edificio":
         errores: list[str] = []
         for nombre, items, clave in [
             ("materiales", self.materiales, "nombre"),
-            ("secciones", self.secciones, "nombre"),
+            ("secciones", [*self.secciones, *self.secciones_area], "nombre"),
             ("nodos", self.nodos, "id"),
             ("barras", self.barras, "id"),
+            ("áreas", self.areas, "id"),
             ("patrones", self.patrones, "nombre"),
             ("combinaciones", self.combinaciones, "nombre"),
         ]:
@@ -262,6 +347,29 @@ class Edificio(BaseModel):
         for s in self.secciones:
             if s.material not in mats:
                 errores.append(f"sección '{s.nombre}': material '{s.material}' no existe")
+        secs_area = {s.nombre for s in self.secciones_area}
+        ares = {a.id for a in self.areas}
+        for s in self.secciones_area:
+            if s.material not in mats:
+                errores.append(f"sección '{s.nombre}': material '{s.material}' no existe")
+        coords = {n.id: n.coords for n in self.nodos}
+        for a in self.areas:
+            faltan = [n for n in a.nodos if n not in nods]
+            if faltan:
+                errores.append(f"área '{a.id}': nodos {faltan} no existen")
+            elif len(set(a.nodos)) < 4:
+                errores.append(f"área '{a.id}': nodos repetidos")
+            else:
+                problema = _revisar_cuadrilatero(np.array([coords[n] for n in a.nodos]))
+                if problema:
+                    errores.append(f"área '{a.id}': {problema}")
+            if a.seccion not in secs_area:
+                errores.append(f"área '{a.id}': sección '{a.seccion}' no existe")
+        for c in self.cargas_area:
+            if c.area not in ares:
+                errores.append(f"carga en área: área '{c.area}' no existe")
+            if c.patron not in pats:
+                errores.append(f"carga en área: patrón '{c.patron}' no existe")
         for b in self.barras:
             for n in (b.i, b.j):
                 if n not in nods:
@@ -323,6 +431,23 @@ class Edificio(BaseModel):
 
     def longitud(self, barra: Barra) -> float:
         return float(np.linalg.norm(self.nodo(barra.j).coords - self.nodo(barra.i).coords))
+
+    def esquinas(self, area: Area) -> np.ndarray:
+        """Coordenadas (4, 3) de las esquinas de un muro o losa."""
+        return np.array([self.nodo(n).coords for n in area.nodos], dtype=float)
+
+    def superficie(self, area: Area) -> float:
+        """Área (m²) del cuadrilátero."""
+        c = self.esquinas(area)
+        return 0.5 * float(np.linalg.norm(np.cross(c[2] - c[0], c[3] - c[1])))
+
+    def ejes_area(self, area: Area) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Ejes locales (1, 2, 3) de un muro o losa, en ejes globales.
+
+        3 es normal al plano. En losas 3 apunta hacia arriba, 1 = X y 2 = Y (si son horizontales).
+        En muros 1 es horizontal a lo largo del muro y 2 vertical hacia arriba.
+        """
+        return ejes_de_plano(self.esquinas(area))
 
     # --- archivos -----------------------------------------------------------
     @classmethod

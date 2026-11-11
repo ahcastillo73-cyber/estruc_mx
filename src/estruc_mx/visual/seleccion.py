@@ -36,6 +36,14 @@ def distancia_a_segmentos(p: np.ndarray, a: np.ndarray, b: np.ndarray) -> np.nda
     return np.linalg.norm(cerca - p, axis=1)
 
 
+def dentro_de_poligonos(p: np.ndarray, poligonos: np.ndarray) -> np.ndarray:
+    """Máscara de los polígonos convexos (n, k, 2) en pantalla que contienen al punto p."""
+    a = poligonos
+    b = np.roll(a, -1, axis=1)
+    cruz = (b[..., 0] - a[..., 0]) * (p[1] - a[..., 1]) - (b[..., 1] - a[..., 1]) * (p[0] - a[..., 0])
+    return np.all(cruz >= 0, axis=1) | np.all(cruz <= 0, axis=1)
+
+
 def elegir(
     clic: tuple[float, float],
     nodos: np.ndarray,
@@ -44,10 +52,12 @@ def elegir(
     matriz: np.ndarray,
     ancho: float,
     alto: float,
+    areas: np.ndarray | None = None,
 ) -> tuple[str, int] | None:
-    """Lo que hay bajo el clic: ("nodo", k), ("barra", k) o ("punto", k) con k el índice en la
-    lista correspondiente. `barras` es un arreglo (n, 2, 3) con los extremos. Tienen prioridad
-    los nodos, luego las barras y al final los puntos de la rejilla."""
+    """Lo que hay bajo el clic: ("nodo", k), ("barra", k), ("area", k) o ("punto", k) con k el
+    índice en la lista correspondiente. `barras` es un arreglo (n, 2, 3) con los extremos y
+    `areas`, (n, 4, 3) con las esquinas. Tienen prioridad los nodos, luego las barras, las áreas
+    (la más cercana a la cámara) y al final los puntos de la rejilla."""
     p = np.asarray(clic, dtype=float)
 
     def mas_cercano_puntos(pts: np.ndarray) -> tuple[int, float] | None:
@@ -69,6 +79,17 @@ def elegir(
         k = int(np.argmin(d))
         if d[k] <= RADIO_BARRA:
             return "barra", k
+    if areas is not None and len(areas):
+        A = np.asarray(areas, dtype=float)
+        n, k = A.shape[:2]
+        px, delante = proyectar(A.reshape(-1, 3), matriz, ancho, alto)
+        px, delante = px.reshape(n, k, 2), delante.reshape(n, k).all(axis=1)
+        dentro = dentro_de_poligonos(p, px) & delante
+        if dentro.any():
+            centros = A.mean(axis=1)
+            h = np.c_[centros, np.ones(n)] @ np.asarray(matriz, dtype=float).T
+            profundidad = np.where(dentro, h[:, 2] / np.where(np.abs(h[:, 3]) > 1e-12, h[:, 3], 1.0), np.inf)
+            return "area", int(np.argmin(profundidad))
     r = mas_cercano_puntos(puntos_rejilla)
     if r and r[1] <= RADIO_NODO:
         return "punto", r[0]

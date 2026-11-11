@@ -35,6 +35,47 @@ def malla_desde_tabla(modelo: Edificio, tabla: dict[str, list[float]] | None, es
     return malla
 
 
+COLORES_AREA = {"muro": "#d8a26b", "losa": "#8fb8de"}
+
+
+def malla_areas(modelo: Edificio, areas=None):
+    """PolyData con un polígono por muro o losa (sin deformar), con el arreglo de celdas "tipo"."""
+    import pyvista as pv
+
+    areas = modelo.areas if areas is None else areas
+    indice = {n.id: n.coords for n in modelo.nodos}
+    puntos = np.array([indice[n] for a in areas for n in a.nodos], dtype=float).reshape(-1, 3)
+    caras = np.array([[4, 4 * k, 4 * k + 1, 4 * k + 2, 4 * k + 3] for k in range(len(areas))], dtype=np.int64).ravel()
+    malla = pv.PolyData(puntos, faces=caras)
+    malla.cell_data["tipo"] = [a.tipo for a in areas]
+    return malla
+
+
+def malla_deformada(modelo: Edificio, tabla: dict[str, list[float]], escala: float, malla=None):
+    """Deformada con la malla de análisis: (líneas de los tramos de barra, cuadriláteros de
+    muros y losas o None). Ambas llevan el arreglo de puntos "desplazamiento"."""
+    import pyvista as pv
+
+    from ..modelo.malla import discretizar
+
+    malla = malla or discretizar(modelo)
+    ids = list(malla.nodos)
+    indice = {n: k for k, n in enumerate(ids)}
+    puntos = np.array([malla.nodos[n] for n in ids], dtype=float)
+    desp = np.array([tabla.get(n, [0.0] * 6)[:3] for n in ids], dtype=float)
+    def_ = puntos + escala * desp
+    norma = np.linalg.norm(desp, axis=1)
+    lineas = None
+    if malla.segmentos:
+        lineas = pv.PolyData(def_, lines=np.array([[2, indice[s.i], indice[s.j]] for s in malla.segmentos], dtype=np.int64).ravel())
+        lineas.point_data["desplazamiento"] = norma
+    cuads = None
+    if malla.elementos:
+        cuads = pv.PolyData(def_, faces=np.array([[4, *(indice[n] for n in e.nodos)] for e in malla.elementos], dtype=np.int64).ravel())
+        cuads.point_data["desplazamiento"] = norma
+    return lineas, cuads
+
+
 def malla_rejilla(rejilla, margen: float = 1.0):
     """Líneas de la rejilla en cada nivel y puntos con los nombres de los ejes (en el nivel
     más bajo, un poco afuera del edificio). Devuelve (líneas, etiquetas) o (None, None)."""
@@ -82,16 +123,22 @@ def mostrar(
     import pyvista as pv
 
     pl = pv.Plotter(off_screen=captura is not None)
-    pl.add_mesh(malla_barras(modelo), color="gray", line_width=2, opacity=0.35 if resultados else 1.0)
+    if modelo.barras:
+        pl.add_mesh(malla_barras(modelo), color="gray", line_width=2, opacity=0.35 if resultados else 1.0)
+    for tipo, color in COLORES_AREA.items():
+        sub = [a for a in modelo.areas if a.tipo == tipo]
+        if sub:
+            pl.add_mesh(malla_areas(modelo, sub), color=color, opacity=0.15 if resultados else 0.5, show_edges=True)
     titulo = modelo.nombre
     if resultados is not None:
         combo = combinacion or resultados.combinaciones[0]
         esc = escala if escala is not None else escala_automatica(modelo, resultados, combo)
-        deformada = malla_barras(modelo, resultados, combo, esc)
-        pl.add_mesh(
-            deformada, scalars="desplazamiento", line_width=4, cmap="viridis",
-            scalar_bar_args={"title": "Desplazamiento (m)"},
-        )
+        lineas, cuads = malla_deformada(modelo, resultados.desplazamientos[combo], esc)
+        barra = {"title": "Desplazamiento (m)"}
+        for parte, ancho in ((cuads, None), (lineas, 4)):
+            if parte is not None:
+                pl.add_mesh(parte, scalars="desplazamiento", cmap="viridis", scalar_bar_args=barra,
+                            **({"line_width": ancho} if ancho else {"show_edges": True, "opacity": 0.85}))
         titulo += f" - {combo} - {resultados.motor} - escala x{esc:.0f}"
     pl.add_text(titulo, font_size=10)
     pl.add_axes()

@@ -15,7 +15,9 @@ from pydantic import ValidationError
 
 from .edificio import (
     Apoyo,
+    Area,
     Barra,
+    CargaArea,
     CargaDistribuida,
     CargaNodal,
     Combinacion,
@@ -24,6 +26,7 @@ from .edificio import (
     Nodo,
     PatronCarga,
     Rejilla,
+    SeccionArea,
     SeccionRectangular,
 )
 
@@ -32,7 +35,7 @@ TOLERANCIA = 1e-6  # m: dos nodos más cercanos que esto son el mismo punto
 EMPOTRADO = (True, True, True, True, True, True)
 ARTICULADO = (True, True, True, False, False, False)
 
-Coleccion = Literal["materiales", "secciones", "patrones", "combinaciones"]
+Coleccion = Literal["materiales", "secciones", "secciones_area", "patrones", "combinaciones"]
 Punto = str | tuple[float, float, float]
 
 
@@ -41,15 +44,26 @@ def modelo_inicial(nombre: str, rejilla: Rejilla | None = None) -> Edificio:
 
     Los valores son de arranque y se editan en Definir: concreto f'c = 250 kg/cm²
     (E ≈ 14 000·√f'c kg/cm² ≈ 22 GPa), combinaciones de gravedad 1.3CM + 1.5CV de las NTC.
+    Mampostería de tabique rojo recocido con f'm ≈ 15 kg/cm² y Em = 600·f'm ≈ 0.88 GPa
+    (NTC Mampostería, cargas de corta duración).
     """
     return Edificio(
         nombre=nombre,
-        materiales=[Material(nombre="Concreto f'c 250", tipo="concreto", E=22_000_000.0, nu=0.2, peso_vol=24.0)],
+        materiales=[
+            Material(nombre="Concreto f'c 250", tipo="concreto", E=22_000_000.0, nu=0.2, peso_vol=24.0),
+            Material(nombre="Tabique rojo", tipo="mamposteria", E=880_000.0, nu=0.25, peso_vol=15.0),
+        ],
         secciones=[
             SeccionRectangular(nombre="C40x40", material="Concreto f'c 250", b=0.40, h=0.40),
             SeccionRectangular(nombre="V25x50", material="Concreto f'c 250", b=0.25, h=0.50),
         ],
-        patrones=[PatronCarga(nombre="CM", tipo="muerta"), PatronCarga(nombre="CV", tipo="viva")],
+        secciones_area=[
+            SeccionArea(nombre="Muro concreto 15", material="Concreto f'c 250", tipo="muro", espesor=0.15),
+            SeccionArea(nombre="Muro tabique 14", material="Tabique rojo", tipo="muro", espesor=0.14),
+            SeccionArea(nombre="Losa 10", material="Concreto f'c 250", tipo="losa", espesor=0.10),
+        ],
+        # CM incluye el peso propio de barras, muros y losas; la masa lo cuenta una sola vez
+        patrones=[PatronCarga(nombre="CM", tipo="muerta", peso_propio=1.0), PatronCarga(nombre="CV", tipo="viva")],
         combinaciones=[
             Combinacion(nombre="CM+CV", factores={"CM": 1.0, "CV": 1.0}),
             Combinacion(nombre="1.3CM+1.5CV", factores={"CM": 1.3, "CV": 1.5}),
@@ -210,24 +224,130 @@ class Editor:
 
         return self._aplicar("Marco desde rejilla", cambio)
 
-    def borrar(self, nodos: Iterable[str] = (), barras: Iterable[str] = ()) -> None:
-        """Borra nodos y barras. Un nodo se lleva sus barras, apoyo, cargas y masas;
-        una barra, sus cargas distribuidas."""
-        nodos, barras = set(nodos), set(barras)
-        if not nodos and not barras:
+    def borrar(self, nodos: Iterable[str] = (), barras: Iterable[str] = (), areas: Iterable[str] = ()) -> None:
+        """Borra nodos, barras y áreas. Un nodo se lleva sus barras, áreas, apoyo, cargas y masas;
+        una barra o un área, sus cargas."""
+        nodos, barras, areas = set(nodos), set(barras), set(areas)
+        if not nodos and not barras and not areas:
             return
 
         def cambio(m: Edificio) -> None:
             quitar_b = barras | {b.id for b in m.barras if b.i in nodos or b.j in nodos}
+            quitar_a = areas | {a.id for a in m.areas if set(a.nodos) & nodos}
             m.nodos = [n for n in m.nodos if n.id not in nodos]
             m.barras = [b for b in m.barras if b.id not in quitar_b]
+            m.areas = [a for a in m.areas if a.id not in quitar_a]
             m.apoyos = [a for a in m.apoyos if a.nodo not in nodos]
             m.cargas_nodales = [c for c in m.cargas_nodales if c.nodo not in nodos]
             m.masas_nodales = [c for c in m.masas_nodales if c.nodo not in nodos]
             m.cargas_distribuidas = [c for c in m.cargas_distribuidas if c.barra not in quitar_b]
+            m.cargas_area = [c for c in m.cargas_area if c.area not in quitar_a]
 
-        n = len(nodos) + len(barras)
+        n = len(nodos) + len(barras) + len(areas)
         self._aplicar(f"Borrar {n} objeto{'s' if n != 1 else ''}", cambio)
+
+    # --- muros y losas ----------------------------------------------------------
+    def agregar_area(self, puntos: Iterable[Punto], seccion: str, tipo: str | None = None) -> str:
+        """Muro o losa con cuatro esquinas (ids de nodo o puntos) en orden alrededor del perímetro.
+        Sin `tipo`, se deduce: horizontal = losa, si no, muro."""
+        puntos = list(puntos)
+        return self._aplicar("Agregar área", lambda m: _area_en(m, puntos, seccion, tipo))
+
+    def agregar_muro(self, p1: tuple[float, float], p2: tuple[float, float], z_inf: float, z_sup: float, seccion: str) -> str:
+        """Muro vertical entre dos puntos (x, y) en planta, de la elevación z_inf a la z_sup."""
+        if z_sup <= z_inf + TOLERANCIA:
+            raise ValueError("el muro necesita z_sup mayor que z_inf")
+        (x1, y1), (x2, y2) = p1, p2
+        esquinas = [(x1, y1, z_inf), (x2, y2, z_inf), (x2, y2, z_sup), (x1, y1, z_sup)]
+
+        def cambio(m: Edificio) -> str:
+            id_ = _area_en(m, esquinas, seccion, "muro")
+            # Un muro que arranca en la base de la rejilla queda empotrado, como el marco
+            if m.rejilla is not None and m.rejilla.niveles and math.isclose(z_inf, m.rejilla.niveles[0].z, abs_tol=TOLERANCIA):
+                _asignar_apoyo(m, list(m.area(id_).nodos[:2]), EMPOTRADO, solo_nuevos=True)
+            return id_
+
+        return self._aplicar("Agregar muro", cambio)
+
+    def agregar_losa(self, p1: tuple[float, float], p2: tuple[float, float], z: float, seccion: str) -> str:
+        """Losa rectangular con esquinas opuestas p1 y p2 (x, y) a la elevación z."""
+        (x1, y1), (x2, y2) = p1, p2
+        if abs(x2 - x1) < TOLERANCIA or abs(y2 - y1) < TOLERANCIA:
+            raise ValueError("las esquinas de la losa deben ser opuestas (distinta X y distinta Y)")
+        xa, xb, ya, yb = min(x1, x2), max(x1, x2), min(y1, y2), max(y1, y2)
+        esquinas = [(xa, ya, z), (xb, ya, z), (xb, yb, z), (xa, yb, z)]
+        return self._aplicar("Agregar losa", lambda m: _area_en(m, esquinas, seccion, "losa"))
+
+    def losas_desde_rejilla(self, seccion: str, niveles: Iterable[str] | None = None) -> int:
+        """Una losa en cada tablero de la rejilla en los niveles indicados (todos menos la base si
+        no se indican). Omite las que ya existen. Devuelve cuántas creó."""
+
+        def cambio(m: Edificio) -> int:
+            r = m.rejilla
+            if r is None or len(r.niveles) < 2 or len(r.ejes_x) < 2 or len(r.ejes_y) < 2:
+                raise ValueError("la rejilla necesita al menos dos ejes en X, dos en Y y dos niveles")
+            elegidos = set(niveles) if niveles is not None else {n.nombre for n in r.niveles[1:]}
+            antes = len(m.areas)
+            for nv in r.niveles:
+                if nv.nombre not in elegidos:
+                    continue
+                for a, b in zip(r.ejes_x, r.ejes_x[1:]):
+                    for c, d in zip(r.ejes_y, r.ejes_y[1:]):
+                        esquinas = [(a.coord, c.coord, nv.z), (b.coord, c.coord, nv.z), (b.coord, d.coord, nv.z), (a.coord, d.coord, nv.z)]
+                        _area_en(m, esquinas, seccion, "losa")
+            return len(m.areas) - antes
+
+        return self._aplicar("Losas desde rejilla", cambio)
+
+    def asignar_seccion_area(self, areas: Iterable[str], seccion: str) -> None:
+        areas = set(areas)
+
+        def cambio(m: Edificio) -> None:
+            for a in m.areas:
+                if a.id in areas:
+                    a.seccion = seccion
+
+        self._aplicar(f"Asignar sección {seccion}", cambio)
+
+    def asignar_carga_area(self, areas: Iterable[str], patron: str, direccion: str, w: float, reemplazar: bool = True) -> None:
+        """Carga uniforme por m² en dirección global; con `reemplazar`, quita antes las de ese
+        patrón y dirección en esas áreas. w = 0 solo las quita."""
+        areas = list(areas)
+
+        def cambio(m: Edificio) -> None:
+            if reemplazar:
+                m.cargas_area = [
+                    c for c in m.cargas_area
+                    if not (c.patron == patron and c.direccion == direccion and c.area in areas)
+                ]
+            if w:
+                m.cargas_area += [CargaArea(patron=patron, area=a, direccion=direccion, w=float(w)) for a in areas]
+
+        self._aplicar(f"Asignar carga en áreas {patron}", cambio)
+
+    def editar_area(self, id_: str, **cambios) -> None:
+        """Cambia campos de un área: id (renombra), tipo, seccion."""
+
+        def cambio(m: Edificio) -> None:
+            a = m.area(id_)
+            id_nuevo = cambios.pop("id", None)
+            nueva = Area.model_validate(a.model_dump() | cambios)
+            for campo in Area.model_fields:
+                setattr(a, campo, getattr(nueva, campo))
+            if id_nuevo and id_nuevo != id_:
+                _exigir_libre(id_nuevo, (o.id for o in m.areas), "área")
+                a.id = id_nuevo
+                for c in m.cargas_area:
+                    if c.area == id_:
+                        c.area = id_nuevo
+
+        self._aplicar(f"Editar área {id_}", cambio)
+
+    def definir_malla(self, tamano: float) -> None:
+        def cambio(m: Edificio) -> None:
+            m.tamano_malla = float(tamano)
+
+        self._aplicar("Editar tamaño de malla", cambio)
 
     def editar_nodo(self, id_: str, *, id_nuevo: str | None = None, x: float | None = None, y: float | None = None, z: float | None = None) -> None:
         def cambio(m: Edificio) -> None:
@@ -245,6 +365,8 @@ class Editor:
                     for o in lst:
                         if o.nodo == id_:
                             o.nodo = id_nuevo
+                for a in m.areas:
+                    a.nodos = tuple(id_nuevo if n == id_ else n for n in a.nodos)
             otro = _nodo_existente(m, (n.x, n.y, n.z), excepto=n.id)
             if otro:
                 raise ValueError(f"ya hay un nodo ({otro}) en ese punto")
@@ -327,19 +449,25 @@ class Editor:
             setattr(m, coleccion, list(items))
             r = renombres.get
             if coleccion == "materiales":
-                for s in m.secciones:
+                for s in (*m.secciones, *m.secciones_area):
                     s.material = r(s.material, s.material)
             elif coleccion == "secciones":
                 for b in m.barras:
                     b.seccion = r(b.seccion, b.seccion)
+            elif coleccion == "secciones_area":
+                for a in m.areas:
+                    a.seccion = r(a.seccion, a.seccion)
             elif coleccion == "patrones":
-                for c in (*m.cargas_nodales, *m.cargas_distribuidas):
+                for c in (*m.cargas_nodales, *m.cargas_distribuidas, *m.cargas_area):
                     c.patron = r(c.patron, c.patron)
                 for co in m.combinaciones:
                     co.factores = {r(p, p): f for p, f in co.factores.items()}
                 m.fuente_masa = {r(p, p): f for p, f in m.fuente_masa.items()}
 
-        nombres = {"materiales": "materiales", "secciones": "secciones", "patrones": "patrones de carga", "combinaciones": "combinaciones"}
+        nombres = {
+            "materiales": "materiales", "secciones": "secciones", "secciones_area": "secciones de muro y losa",
+            "patrones": "patrones de carga", "combinaciones": "combinaciones",
+        }
         self._aplicar(f"Editar {nombres[coleccion]}", cambio)
 
     def definir_masa(self, fuente: dict[str, float], peso_propio: bool) -> None:
@@ -431,6 +559,22 @@ def _barra_entre(m: Edificio, i: Punto, j: Punto, seccion: str, tipo: str | None
         ni, nj = nj, ni  # las columnas van de abajo hacia arriba
     id_ = _siguiente(_PREFIJOS.get(tipo, "B"), (b.id for b in m.barras))
     m.barras.append(Barra(id=id_, tipo=tipo, i=ni, j=nj, seccion=seccion))
+    return id_
+
+
+def _area_en(m: Edificio, puntos: list[Punto], seccion: str, tipo: str | None) -> str:
+    if len(puntos) != 4:
+        raise ValueError("un muro o losa necesita cuatro esquinas")
+    ids = [p if isinstance(p, str) else _nodo_en(m, p) for p in puntos]
+    if len(set(ids)) != 4:
+        raise ValueError("las cuatro esquinas deben ser nodos distintos")
+    for a in m.areas:
+        if set(a.nodos) == set(ids):
+            return a.id  # ya existe: no se duplica
+    if tipo is None:
+        tipo = "losa" if all(math.isclose(m.nodo(n).z, m.nodo(ids[0]).z, abs_tol=TOLERANCIA) for n in ids) else "muro"
+    id_ = _siguiente("L" if tipo == "losa" else "M", (a.id for a in m.areas))
+    m.areas.append(Area(id=id_, tipo=tipo, nodos=tuple(ids), seccion=seccion))
     return id_
 
 

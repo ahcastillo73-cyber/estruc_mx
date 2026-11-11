@@ -40,7 +40,9 @@ def test_marco_desde_rejilla_y_analisis(editor):
     editor.asignar_carga_distribuida(vigas, "CM", "Z", -20.0)
     r = pynite.analizar(editor.modelo)
     longitud = sum(editor.modelo.longitud(editor.modelo.barra(v)) for v in vigas)
-    assert sum(v[2] for v in r.reacciones["CM+CV"].values()) == pytest.approx(20.0 * longitud)
+    # CM incluye el peso propio de las barras (modelo inicial)
+    pp = sum(b_.A * 24.0 * editor.modelo.longitud(b) for b in editor.modelo.barras for b_ in [editor.modelo.seccion(b.seccion)])
+    assert sum(v[2] for v in r.reacciones["CM+CV"].values()) == pytest.approx(20.0 * longitud + pp)
 
 
 def test_deshacer_y_rehacer(editor):

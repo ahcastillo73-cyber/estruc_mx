@@ -286,11 +286,17 @@ class VentanaPrincipal(EdicionMixin, QMainWindow):
         nombres = []
         if s.modelo is not None:
             nombres.append("Modelo")
+        hay_muros = s.modelo is not None and any(a.tipo == "muro" for a in s.modelo.areas)
+        hay_losas = s.modelo is not None and any(a.tipo == "losa" for a in s.modelo.areas)
         if s.estatico is not None:
             nombres += ["Desplazamientos", "Reacciones"]
+            nombres += ["Fuerzas en muros"] * hay_muros + ["Momentos en losas"] * hay_losas
         if s.propiedades is not None:
             nombres.append("Modos")
-        nombres += [f"Derivas {d}" for d in sorted(s.espectrales)]
+        for d in sorted(s.espectrales):
+            nombres.append(f"Derivas {d}")
+            if hay_muros:
+                nombres.append(f"Muros espectral {d}")
         return nombres
 
     def _combinacion_actual(self) -> str | None:
@@ -303,13 +309,18 @@ class VentanaPrincipal(EdicionMixin, QMainWindow):
         s = self.sesion
         if nombre == "Modelo" and s.modelo is not None:
             return s.resumen()
-        if nombre in ("Desplazamientos", "Reacciones") and s.estatico is not None:
+        if nombre in ("Desplazamientos", "Reacciones", "Fuerzas en muros", "Momentos en losas") and s.estatico is not None:
             combo = self._combinacion_actual()
-            return s.tabla_desplazamientos(combo) if nombre == "Desplazamientos" else s.tabla_reacciones(combo)
+            return {
+                "Desplazamientos": s.tabla_desplazamientos, "Reacciones": s.tabla_reacciones,
+                "Fuerzas en muros": s.tabla_muros, "Momentos en losas": s.tabla_losas,
+            }[nombre](combo)
         if nombre == "Modos" and s.propiedades is not None:
             return s.tabla_modal()
         if nombre.startswith("Derivas ") and nombre[-1] in s.espectrales:
             return s.tabla_derivas(nombre[-1])
+        if nombre.startswith("Muros espectral ") and nombre[-1] in s.espectrales:
+            return s.tabla_muros_espectral(nombre[-1])
         return None
 
     def _mostrar_tabla_elegida(self, nombre: str) -> None:
@@ -362,7 +373,7 @@ class VentanaPrincipal(EdicionMixin, QMainWindow):
             return
         import pyvista as pv
 
-        from ..visual.vista3d import escala_para_tabla, malla_desde_tabla, malla_rejilla
+        from ..visual.vista3d import COLORES_AREA, escala_para_tabla, malla_areas, malla_deformada, malla_rejilla
 
         modelo = self.sesion.modelo
         opcion = self.selector_vista.currentText() or _VISTA_MODELO
@@ -393,16 +404,27 @@ class VentanaPrincipal(EdicionMixin, QMainWindow):
                 pv.PolyData(np.array([n.coords for n in modelo.nodos])), color="black", point_size=7,
                 render_points_as_spheres=True, pickable=False,
             )
+        for tipo, color in COLORES_AREA.items():
+            sub = [a for a in modelo.areas if a.tipo == tipo]
+            if sub:
+                self.plotter.add_mesh(
+                    malla_areas(modelo, sub), color=color, opacity=0.12 if tabla else 0.45, show_edges=True,
+                    edge_color="#7a6a55", pickable=False,
+                )
         apoyados = {a.nodo for a in modelo.apoyos}
         if apoyados:
             pts = np.array([n.coords for n in modelo.nodos if n.id in apoyados])
             self.plotter.add_mesh(pv.PolyData(pts), color="#e67e22", point_size=14, render_points_as_spheres=False, pickable=False)
-        if tabla is not None and modelo.barras:
+        if tabla is not None and (modelo.barras or modelo.areas):
             escala = escala_para_tabla(modelo, tabla) * self.factor_escala.value()
-            self.plotter.add_mesh(
-                malla_desde_tabla(modelo, tabla, escala), scalars="desplazamiento", line_width=4, cmap="viridis",
-                scalar_bar_args={"title": "Desplazamiento" + (" (m)" if not opcion.startswith("Modo") else " (relativo)")},
-            )
+            lineas, cuads = malla_deformada(modelo, tabla, escala, self._malla())
+            barra = {"title": "Desplazamiento" + (" (m)" if not opcion.startswith("Modo") else " (relativo)")}
+            if cuads is not None:
+                self.plotter.add_mesh(cuads, scalars="desplazamiento", cmap="viridis", show_edges=True, opacity=0.9,
+                                      scalar_bar_args=barra, pickable=False)
+            if lineas is not None:
+                self.plotter.add_mesh(lineas, scalars="desplazamiento", line_width=4, cmap="viridis",
+                                      scalar_bar_args=barra, pickable=False)
         self.plotter.add_text(f"{modelo.nombre} - {opcion}", font_size=9, color="black", name="titulo")
         self.plotter.show_axes()
         self._dibujar_seleccion(render=False)
@@ -412,17 +434,33 @@ class VentanaPrincipal(EdicionMixin, QMainWindow):
             self.plotter.camera_position = camara
         self.plotter.render()
 
+    def _malla(self):
+        """Malla de análisis del modelo actual (se recalcula solo si el modelo cambió)."""
+        from ..modelo.malla import discretizar
+
+        m = self.sesion.modelo
+        if getattr(self, "_malla_de", None) is not m:
+            self._malla_cache = discretizar(m)
+            self._malla_de = m
+        return self._malla_cache
+
     def _dibujar_seleccion(self, render: bool = True) -> None:
         """Resalta lo seleccionado (y el primer extremo de una barra en dibujo) sin redibujar todo."""
         if self.plotter is None:
             return
         import pyvista as pv
 
-        for nombre in ("sel_barras", "sel_nodos", "primer_punto"):
+        for nombre in ("sel_barras", "sel_nodos", "sel_areas", "primer_punto"):
             self.plotter.remove_actor(nombre, render=False)
         m = self.sesion.modelo
         # Sobre una deformada el resaltado estorba: solo se dibuja en el modelo sin deformar
         if m is not None and self.tabla_de_vista(self.selector_vista.currentText()) is None:
+            areas = [a for a in m.areas if a.id in self.sel_areas]
+            if areas:
+                from ..visual.vista3d import malla_areas
+
+                self.plotter.add_mesh(malla_areas(m, areas), color="red", opacity=0.45, show_edges=True, edge_color="red",
+                                      line_width=3, name="sel_areas", pickable=False)
             barras = [b for b in m.barras if b.id in self.sel_barras]
             if barras:
                 self.plotter.add_mesh(_malla_lineas(m, barras), color="red", line_width=6, name="sel_barras", pickable=False)
@@ -465,7 +503,11 @@ class VentanaPrincipal(EdicionMixin, QMainWindow):
         puntos = []
         if self.modo != "seleccionar" and m.rejilla is not None:
             puntos = [p for _, p in m.rejilla.intersecciones()]
-        r = elegir((x, y), nodos, barras, np.array(puntos, dtype=float).reshape(-1, 3), matriz_camara(ren), ancho, alto)
+        # Al dibujar, los muros y losas no estorban: solo cuentan nodos y puntos de la rejilla
+        areas = None
+        if self.modo == "seleccionar" and m.areas:
+            areas = np.array([[indice[n] for n in a.nodos] for a in m.areas]).reshape(-1, 4, 3)
+        r = elegir((x, y), nodos, barras, np.array(puntos, dtype=float).reshape(-1, 3), matriz_camara(ren), ancho, alto, areas)
         if r is None:
             return None
         que, k = r
@@ -473,6 +515,8 @@ class VentanaPrincipal(EdicionMixin, QMainWindow):
             return "nodo", m.nodos[k].id
         if que == "barra":
             return "barra", m.barras[k].id
+        if que == "area":
+            return "area", m.areas[k].id
         return "punto", tuple(puntos[k])
 
     # --- estado -----------------------------------------------------------------
