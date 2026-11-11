@@ -34,6 +34,15 @@ def test_a_min_interpola_entre_ts_corto_y_largo():
     assert ntc_sismo.a_min(None) == pytest.approx(0.06)  # sin Ts, el mayor
 
 
+def test_ks_por_zona():
+    assert ntc_sismo.ks("A") == pytest.approx(1 / 6)
+    assert ntc_sismo.ks("C") == pytest.approx(1 / 4)
+    assert ntc_sismo.ks("B", 0.75) == pytest.approx(1 / 5)
+    assert ntc_sismo.ks("B", 2.0) == pytest.approx(1 / 4)  # Ts fuera de 0.5–1.0 s se acota
+    with pytest.raises(ValueError):
+        ntc_sismo.ks("B")
+
+
 def test_excentricidad_crece_de_005_a_010():
     assert [ntc_sismo.excentricidad_accidental(i, 3) for i in (1, 2, 3)] == pytest.approx([0.05, 0.075, 0.10])
     assert ntc_sismo.excentricidad_accidental(1, 1) == pytest.approx(0.05)
@@ -67,8 +76,16 @@ def test_cargas_de_torsion_son_un_par_puro(marco):
         F = np.array([c.fuerzas for c in cargas])
         xy = np.array([[m.nodo(c.nodo).x - t.xc, m.nodo(c.nodo).y - t.yc] for c in cargas])
         assert F[:, 0].sum() == pytest.approx(0, abs=1e-9) and F[:, 1].sum() == pytest.approx(0, abs=1e-9)
-        assert np.sum(xy[:, 0] * F[:, 1] - xy[:, 1] * F[:, 0]) == pytest.approx(t.M)
-        assert t.M == pytest.approx(t.F * t.fraccion * 5.0)  # b = 5 m para sismo en X
+        assert np.sum(xy[:, 0] * F[:, 1] - xy[:, 1] * F[:, 0]) == pytest.approx(t.M0)
+        assert t.Ma == pytest.approx(t.V * t.fraccion * 5.0)  # b = 5 m para sismo en X
+
+
+def test_momentos_de_nivel_suman_los_de_entrepiso(marco):
+    # Ec. 2.3.3: la suma de M0 de los niveles de arriba es el momento Ma = V·ea del entrepiso
+    m, modos, r = marco
+    t = revisar(m, modos, r, pynite).torsion["X"]
+    for i in range(len(t)):
+        assert sum(x.M0 for x in t[i:]) == pytest.approx(t[i].Ma)
 
 
 def test_sin_torsion_ni_ortogonal_reproduce_el_espectral(marco):
@@ -119,6 +136,8 @@ def test_servicio_con_divisor_o_espectro(marco):
         assert [x.deriva for x in rev.derivas_servicio[d]] == pytest.approx([x.deriva / 4.0 for x in rev.derivas[d]])
     sin = revisar(m, modos, r, pynite)
     assert sin.derivas_servicio == {}
+    zona = revisar(m, modos, r, pynite, CriteriosSismicos(zona="A"))
+    assert [x.deriva for x in zona.derivas_servicio["X"]] == pytest.approx([x.deriva / 6 for x in rev.derivas["X"]])
 
     m2 = m.model_copy(deep=True)
     e = m.espectro

@@ -5,14 +5,15 @@ Toma las respuestas espectrales en X y en Y y añade lo que piden las normas:
 1. Cortante basal mínimo: si el cortante de diseño V0 es menor que el mínimo, se calcula un
    factor de escala para las fuerzas de diseño (NTC 2020, 1.7: los desplazamientos no se
    escalan; opcionalmente también se escalan).
-2. Torsión accidental: en cada piso se aplica un momento torsionante M = F·e_a, con F la fuerza
-   del piso (diferencia de cortantes de entrepiso del análisis modal) y e_a la excentricidad
+2. Torsión accidental (NTC 2023, 2.3): en cada nivel se aplica el momento M0i = Mai − Ma(i+1),
+   con Mai = Vi·eai, Vi el cortante del entrepiso i del análisis modal y eai la excentricidad
    accidental medida perpendicularmente al sismo. Se resuelve como caso estático con el mismo
    motor y su efecto se suma, con el signo más desfavorable, al del análisis modal (que ya
-   incluye la excentricidad estática por usar el modelo tridimensional).
+   incluye la torsión natural por usar el modelo tridimensional).
 3. Componentes ortogonales: 100 % del sismo en una dirección más 30 % del perpendicular, y la
    envolvente de las dos combinaciones.
-4. Distorsiones para seguridad contra colapso (con torsión y 100/30) y de servicio.
+4. Distorsiones (1.7) para Seguridad de Vida, Ocupación Inmediata y Limitación de Daño, con
+   torsión y 100/30.
 
 Sin diafragma rígido el momento torsionante se reparte a los nodos del modelo en el piso,
 proporcional a su masa y a su distancia al centro de masa (rotación de cuerpo rígido); con
@@ -52,7 +53,9 @@ class CriteriosSismicos:
     torsion: bool = True
     excentricidad: float | None = None  # fracción de b fija en todos los pisos; None = la de la norma
     ortogonal: float = ntc_sismo.FACTOR_ORTOGONAL
-    # Servicio sin espectro de servicio en el modelo: distorsión de colapso / este divisor
+    # Limitación de Daño: espectro elástico × Ks de la zona (A, B o C; B necesita Ts). Si el
+    # modelo tiene `espectro_servicio`, se usa ese; si se da el divisor, elástico / divisor.
+    zona: str | None = None
     divisor_servicio: float | None = None
     limite_servicio: float = ntc_sismo.DISTORSION_SERVICIO
 
@@ -83,15 +86,17 @@ class TorsionPiso:
     yc: float
     b: float  # dimensión perpendicular al sismo, m
     fraccion: float  # e_a / b
-    F: float  # fuerza del piso, kN (sin escalar)
+    V: float  # cortante del entrepiso de abajo del nivel, kN (sin escalar)
+    M0: float = 0.0  # momento aplicado en el nivel, Ma(i) − Ma(i+1), kN·m
 
     @property
     def e(self) -> float:
         return self.fraccion * self.b
 
     @property
-    def M(self) -> float:
-        return self.F * self.e
+    def Ma(self) -> float:
+        """Momento torsionante de entrepiso, V·e_a."""
+        return self.V * self.e
 
 
 @dataclass
@@ -113,6 +118,8 @@ class RevisionSismica:
     # Igual que `derivas` pero ya en términos de servicio (comparables con el límite de servicio)
     derivas_servicio: dict[str, list[DerivaNivel]] = field(default_factory=dict)
     origen_servicio: str = ""
+    # Con el espectro elástico (Ocupación Inmediata, Grupo A)
+    derivas_elasticas: dict[str, list[DerivaNivel]] = field(default_factory=dict)
     # muro -> fuerzas sísmicas de diseño (escaladas, con torsión y 100/30), valores positivos
     fuerzas_muros: dict[str, dict[str, float]] = field(default_factory=dict)
     avisos: list[str] = field(default_factory=list)
@@ -146,21 +153,17 @@ def cortante_minimo(modelo: Edificio, r: RespuestaEspectral, W: float, c: Criter
     return CortanteMinimo(r.direccion, V0, W, coef, origen, T1)
 
 
-def _fuerzas_piso(r: RespuestaEspectral) -> list[float]:
-    """Fuerza de cada piso: diferencia de cortantes de entrepiso combinados."""
-    v = [x for _, x in r.cortantes_entrepiso] + [0.0]
-    return [max(v[k] - v[k + 1], 0.0) for k in range(len(v) - 1)]
-
-
 def _torsion_pisos(lista: list[Piso], r: RespuestaEspectral, c: CriteriosSismicos) -> list[TorsionPiso]:
-    F = _fuerzas_piso(r)
     n = len(lista)
     regla = cfe_sismo.excentricidad_accidental if c.norma == "CFE" else ntc_sismo.excentricidad_accidental
     out = []
-    for i, (p, f) in enumerate(zip(lista, F), start=1):
+    for i, (p, (_, V)) in enumerate(zip(lista, r.cortantes_entrepiso), start=1):
         frac = c.excentricidad if c.excentricidad is not None else regla(i, n)
         b = p.by if r.direccion == "X" else p.bx
-        out.append(TorsionPiso(z=p.z, xc=p.xc, yc=p.yc, b=b, fraccion=frac, F=f))
+        out.append(TorsionPiso(z=p.z, xc=p.xc, yc=p.yc, b=b, fraccion=frac, V=V))
+    # Ec. 2.3.3: el momento en cada nivel es la diferencia de los de entrepiso
+    for k, t in enumerate(out):
+        t.M0 = t.Ma - (out[k + 1].Ma if k + 1 < len(out) else 0.0)
     return out
 
 
@@ -171,7 +174,7 @@ def cargas_torsion(modelo: Edificio, lista: list[Piso], torsion: list[TorsionPis
     cargas = []
     for p, t in zip(lista, torsion):
         nodos = [n for n in p.nodos if n in del_modelo]
-        if not nodos or t.M == 0:
+        if not nodos or t.M0 == 0:
             continue
         xy = np.array([[modelo.nodo(n).x - t.xc, modelo.nodo(n).y - t.yc] for n in nodos])
         w = np.array([masas.get(n, 0.0) for n in nodos])
@@ -179,9 +182,9 @@ def cargas_torsion(modelo: Edificio, lista: list[Piso], torsion: list[TorsionPis
             w = np.ones(len(nodos))
         J = float(np.sum(w * np.sum(xy**2, axis=1)))
         if J <= 1e-12:
-            cargas.append(CargaNodal(patron=patron, nodo=nodos[0], fuerzas=(0, 0, 0, 0, 0, t.M)))
+            cargas.append(CargaNodal(patron=patron, nodo=nodos[0], fuerzas=(0, 0, 0, 0, 0, t.M0)))
             continue
-        k = t.M / J
+        k = t.M0 / J
         for n, (dx, dy), wi in zip(nodos, xy, w):
             if wi:
                 cargas.append(CargaNodal(patron=patron, nodo=n, fuerzas=(-k * wi * dy, k * wi * dx, 0, 0, 0, 0)))
@@ -263,8 +266,14 @@ def revisar(modelo: Edificio, modos: Modos, respuestas: dict[str, RespuestaEspec
     }
     rev.derivas = _envolvente(por_sismo, elementos, c.ortogonal)
 
-    # --- servicio ----------------------------------------------------------------
-    qr = _factor_qr(modelo, c)
+    # --- Ocupación Inmediata y Limitación de Daño (espectro elástico) ------------
+    # La distorsión elástica es la calculada por la reducción del espectro de diseño; la torsión,
+    # que sale de los mismos cortantes, se escala igual.
+    red = modelo.espectro.reduccion
+    elastica = _envolvente({d: [{k: red * (e.componentes[k] + t[k]) for k in DIRECCIONES}
+                                for e, t in zip(respuestas[d].derivas_elementos, tors_derivas[d])]
+                            for d in DIRECCIONES}, elementos, c.ortogonal)
+    rev.derivas_elasticas = elastica
     if modelo.espectro_servicio is not None:
         serv = {d: espectral(modelo, modos, d, respuestas[d].metodo, espectro=modelo.espectro_servicio)
                 for d in DIRECCIONES}
@@ -275,14 +284,17 @@ def revisar(modelo: Edificio, modos: Modos, respuestas: dict[str, RespuestaEspec
                   for e, t in zip(serv[d].derivas_elementos, tors_derivas[d])] for d in DIRECCIONES}
         rev.derivas_servicio = _envolvente(ps, elementos, c.ortogonal)
         rev.origen_servicio = f"espectro de servicio «{modelo.espectro_servicio.nombre}» del modelo"
-    elif c.divisor_servicio:
-        f = qr / c.divisor_servicio
-        sin_escala = _envolvente({d: [{k: e.componentes[k] + t[k] for k in DIRECCIONES}
-                                      for e, t in zip(respuestas[d].derivas_elementos, tors_derivas[d])]
-                                  for d in DIRECCIONES}, elementos, c.ortogonal)
-        rev.derivas_servicio = {k: [DerivaNivel(x.nivel, x.deriva * f, x.elemento, x.gobierna) for x in v]
-                                for k, v in sin_escala.items()}
-        rev.origen_servicio = f"distorsión de colapso (× {qr:g}) dividida entre {c.divisor_servicio:g}"
+    else:
+        f = None
+        if c.divisor_servicio:
+            f, rev.origen_servicio = 1 / c.divisor_servicio, f"espectro elástico dividido entre {c.divisor_servicio:g}"
+        elif c.zona:
+            f = ntc_sismo.ks(c.zona, c.periodo_sitio)
+            ts = f", Ts = {c.periodo_sitio:g} s" if c.zona.upper() == "B" else ""
+            rev.origen_servicio = f"espectro elástico por Ks = {f:.4f} (zona {c.zona.upper()}{ts}, ec. 3.1.1)"
+        if f is not None:
+            rev.derivas_servicio = {k: [DerivaNivel(x.nivel, x.deriva * f, x.elemento, x.gobierna) for x in v]
+                                    for k, v in elastica.items()}
 
     # --- fuerzas de diseño en muros ----------------------------------------------
     if all(respuestas[d].fuerzas_muros for d in DIRECCIONES):

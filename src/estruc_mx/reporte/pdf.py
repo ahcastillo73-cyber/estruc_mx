@@ -23,7 +23,24 @@ FONDO = colors.HexColor("#e8eef5")
 AVISO = colors.HexColor("#fdecea")
 
 
-# Helvetica no trae los superíndices fuera de Latin-1
+def _fuentes() -> tuple[str, str]:
+    """DejaVu Sans (viene con matplotlib) para tener letras griegas y símbolos como ≤ en las
+    fórmulas; si no se encuentra, Helvetica, que solo cubre Latin-1."""
+    try:
+        import matplotlib
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+
+        carpeta = Path(matplotlib.get_data_path()) / "fonts" / "ttf"
+        for nombre, archivo in (("DejaVuSans", "DejaVuSans.ttf"), ("DejaVuSans-Bold", "DejaVuSans-Bold.ttf")):
+            if nombre not in pdfmetrics.getRegisteredFontNames():
+                pdfmetrics.registerFont(TTFont(nombre, str(carpeta / archivo)))
+        return "DejaVuSans", "DejaVuSans-Bold"
+    except Exception:
+        return "Helvetica", "Helvetica-Bold"
+
+
+# Por si se usa Helvetica, que no trae estos superíndices
 _SUPER = {"⁴": "<super>4</super>", "⁵": "<super>5</super>", "⁶": "<super>6</super>"}
 
 
@@ -37,6 +54,11 @@ def _x(texto: str) -> str:
 
 def _estilos():
     base = getSampleStyleSheet()
+    normal, negrita = _fuentes()
+    for nombre in ("Title", "Heading1", "Heading2"):
+        base[nombre].fontName = negrita
+    for nombre in ("Normal", "BodyText"):
+        base[nombre].fontName = normal
     return {
         "titulo": ParagraphStyle("titulo", parent=base["Title"], textColor=AZUL, fontSize=20, leading=24),
         "subtitulo": ParagraphStyle("subtitulo", parent=base["Normal"], alignment=TA_CENTER, fontSize=12,
@@ -54,7 +76,7 @@ def _estilos():
                                   textColor=colors.HexColor("#333333"), spaceAfter=8),
         "celda": ParagraphStyle("celda", parent=base["BodyText"], fontSize=8, leading=9.5),
         "celda_enc": ParagraphStyle("celda_enc", parent=base["BodyText"], fontSize=8, leading=9.5,
-                                    textColor=colors.white, fontName="Helvetica-Bold"),
+                                    textColor=colors.white, fontName=negrita),
     }
 
 
@@ -111,7 +133,7 @@ def escribir_pdf(doc: Documento, ruta: str | Path) -> None:
 
     def pie(canvas, _doc):
         canvas.saveState()
-        canvas.setFont("Helvetica", 7.5)
+        canvas.setFont(_fuentes()[0], 7.5)
         canvas.setFillColor(colors.HexColor("#777777"))
         canvas.drawString(margen, 1.2 * cm, f"{doc.titulo} · {doc.subtitulo}")
         canvas.drawRightString(letter[0] - margen, 1.2 * cm, f"Página {canvas.getPageNumber()}")

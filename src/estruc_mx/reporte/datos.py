@@ -30,8 +30,10 @@ class Opciones:
     factor_deriva: float | None = None
     # Revisión sísmica (analisis/revision_sismica.py)
     norma: str = "NTC"  # "NTC" o "CFE"
+    grupo: str = "B"  # A: Ocupación Inmediata; B: Limitación de Daño No Estructural
+    zona: str | None = None  # zona sísmica A, B o C, para Ks
     periodo_sitio: float | None = None  # Ts, s
-    sobrerresistencia: float = 1.0  # R que divide a a_min
+    sobrerresistencia: float = 1.0  # R′ que divide a a_min
     cortante_minimo: float | None = None  # coeficiente explícito, fracción de W
     escalar_desplazamientos: bool = False
     torsion: bool = True
@@ -46,8 +48,15 @@ class Opciones:
         if self.deriva_limite is not None:
             return self.deriva_limite, "indicada por el usuario"
         if self.sistema:
-            desc, valor = DISTORSIONES_LIMITE[self.sistema]
-            return valor, f"NTC Sismo, {desc.lower()}"
+            desc, _, valor, _ = DISTORSIONES_LIMITE[self.sistema]
+            return valor, f"γSV de las NTC Sismo 2023, {desc[0].lower() + desc[1:]}"
+        return None, ""
+
+    def limite_oi(self) -> tuple[float | None, str]:
+        """γOI para Ocupación Inmediata (Grupo A)."""
+        if self.sistema:
+            desc, _, _, valor = DISTORSIONES_LIMITE[self.sistema]
+            return valor, f"γOI de las NTC Sismo 2023, {desc[0].lower() + desc[1:]}"
         return None, ""
 
     def criterios(self) -> CriteriosSismicos:
@@ -55,7 +64,7 @@ class Opciones:
             norma=self.norma, factor_qr=self.factor_deriva, periodo_sitio=self.periodo_sitio,
             sobrerresistencia=self.sobrerresistencia, cortante_minimo=self.cortante_minimo,
             escalar_desplazamientos=self.escalar_desplazamientos, torsion=self.torsion,
-            excentricidad=self.excentricidad, divisor_servicio=self.divisor_servicio,
+            excentricidad=self.excentricidad, zona=self.zona, divisor_servicio=self.divisor_servicio,
             limite_servicio=self.limite_servicio,
         )
 
@@ -94,6 +103,8 @@ def _motor(nombre: str):
 def preparar(modelo: Edificio, opciones: Opciones | None = None) -> DatosReporte:
     """Corre el análisis estático, el modal y el espectral en X y Y con el motor elegido."""
     op = opciones or Opciones()
+    if op.grupo not in ("A", "B"):
+        raise ValueError(f"grupo '{op.grupo}' desconocido; opciones: A, B")
     if op.norma not in ("NTC", "CFE"):
         raise ValueError(f"norma '{op.norma}' desconocida; opciones: NTC, CFE")
     if op.sistema and op.sistema not in DISTORSIONES_LIMITE:
