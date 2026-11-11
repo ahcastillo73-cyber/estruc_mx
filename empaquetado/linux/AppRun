@@ -1,0 +1,4 @@
+#!/bin/sh
+# Punto de entrada del AppImage: la aplicación de PyInstaller está en usr/bin
+AQUI="$(dirname "$(readlink -f "$0")")"
+exec "$AQUI/usr/bin/estruc-mx/estruc-mx" "$@"
