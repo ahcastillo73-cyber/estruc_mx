@@ -1,7 +1,7 @@
 """Reporte de análisis por bloques: datos -> secciones -> bloques -> PDF o Word.
 
     from estruc_mx.reporte import Opciones, generar
-    generar(modelo, "reporte.pdf", Opciones(motor="pynite", sistema="marco_ductil_concreto"))
+    generar(modelo, "reporte.pdf", Opciones(motor="pynite", sistema="marco_concreto_alta"))
 
 - `datos.preparar` corre los análisis.
 - `secciones.SECCIONES` convierte los datos en bloques; ahí se añaden secciones nuevas.

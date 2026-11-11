@@ -13,7 +13,7 @@ from test_cli import EJEMPLO  # noqa: E402
 
 @pytest.fixture(scope="module")
 def datos():
-    return preparar(construir_marco(), Opciones(n_modos=6, sistema="marco_ductil_concreto"))
+    return preparar(construir_marco(), Opciones(n_modos=6, sistema="marco_concreto_alta"))
 
 
 def test_preparar_corre_todos_los_analisis(datos):
@@ -38,9 +38,30 @@ def test_derivas_comparan_contra_limite(datos):
     tabla = next(b for b in doc.bloques if isinstance(b, Tabla))
     assert tabla.encabezados[-1] == "Cumple"
     assert len(tabla.filas) == 3  # tres niveles
-    # La distorsión de la tabla es la del análisis espectral por el factor (1 con espectro elástico)
-    x = datos.espectral["X"].derivas[0].deriva
+    # La distorsión de la tabla es la de la revisión (con torsión y 100/30) por el factor (1 con
+    # espectro elástico), mayor que la del análisis espectral solo
+    x = datos.revision.derivas["X"][0].deriva
     assert float(tabla.filas[0][1]) == pytest.approx(x, abs=1e-5)
+    assert x > datos.espectral["X"].derivas[0].deriva
+
+
+def test_revision_sismica_en_el_reporte(datos):
+    doc = construir(datos, ["cortante", "torsion", "derivas"])
+    titulos = [t.titulo for t in doc.bloques if isinstance(t, Tabla)]
+    assert "Revisión del cortante basal mínimo" in titulos
+    assert any(t.startswith("Torsión accidental") for t in titulos)
+    assert "Fórmulas de referencia" in titulos
+    # Sin zona ni espectro de servicio, la Limitación de Daño queda pendiente y se avisa
+    assert "Distorsiones para Limitación de Daño" not in titulos
+    d2 = preparar(construir_marco(), Opciones(n_modos=6, sistema="marco_concreto_alta", zona="B", periodo_sitio=0.75))
+    titulos = [t.titulo for t in construir(d2, ["derivas"]).bloques if isinstance(t, Tabla)]
+    assert "Distorsiones para Limitación de Daño" in titulos
+    # Grupo A: Ocupación Inmediata contra γOI en lugar de Limitación de Daño
+    d3 = preparar(construir_marco(), Opciones(n_modos=6, sistema="marco_concreto_alta", grupo="A"))
+    tablas = [t for t in construir(d3, ["derivas"]).bloques if isinstance(t, Tabla)]
+    oi = next(t for t in tablas if t.titulo == "Distorsiones para Ocupación Inmediata")
+    assert oi.encabezados[-1] == "Cumple"
+    assert "Distorsiones para Limitación de Daño" not in [t.titulo for t in tablas]
 
 
 def test_seccion_desconocida(datos):
@@ -77,7 +98,7 @@ def test_cli_reporte(tmp_path, capsys):
     assert main(["reporte", EJEMPLO, "-o", str(destino), "--modos", "6", "--deriva-limite", "0.015"]) == 0
     assert destino.read_bytes().startswith(b"%PDF")
     assert main(["reporte", "--sistemas"]) == 0
-    assert "marco_ductil_concreto" in capsys.readouterr().out
+    assert "marco_concreto_alta" in capsys.readouterr().out
 
 
 def test_reporte_con_muros_y_losas(tmp_path):
