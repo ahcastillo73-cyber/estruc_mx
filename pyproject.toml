@@ -19,7 +19,9 @@ dependencies = [
 opensees = ["openseespy>=3.8"]
 visual = ["pyvista>=0.44"]
 gui = ["PySide6>=6.6", "pyvista>=0.44", "pyvistaqt>=0.11"]
-dev = ["pytest>=8", "pytest-qt>=4.4"]
+dev = ["pytest>=8"]
+# Solo para las pruebas de la ventana; necesita PySide6 (extra gui)
+prueba-gui = ["pytest-qt>=4.4"]
 
 [project.scripts]
 estruc-mx = "estruc_mx.cli:main"
@@ -32,4 +34,3 @@ packages = ["src/estruc_mx"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-qt_api = "pyside6"
