@@ -7,11 +7,14 @@ así que los ejes locales de las barras quedan iguales a los de `Edificio.ejes_l
 
 from __future__ import annotations
 
+import math
+
 from Pynite import FEModel3D
 
-from ..modelo import Edificio
+from ..modelo import Edificio, masas_nodales
+from ..modelo.masas import G
 from .comun import combinaciones_efectivas
-from .resultados import Resultados
+from .resultados import Modos, Resultados
 
 
 def _a_pynite(v):
@@ -30,7 +33,8 @@ _DIR_DIST = {"X": ("FX", 1.0), "Y": ("FZ", -1.0), "Z": ("FY", 1.0)}
 def construir(modelo: Edificio) -> FEModel3D:
     fem = FEModel3D()
     for m in modelo.materiales:
-        fem.add_material(m.nombre, m.E, m.G, m.nu, m.peso_vol / 9.80665)
+        # Densidad 0: la masa la reparte modelo/masas.py igual para todos los motores.
+        fem.add_material(m.nombre, m.E, m.G, m.nu, 0.0)
     for s in modelo.secciones:
         # Iy de PyNite = menor (I22), Iz de PyNite = mayor (I33)
         fem.add_section(s.nombre, s.A, s.I22, s.I33, s.J)
@@ -78,4 +82,33 @@ def analizar(modelo: Edificio) -> Resultados:
             F = _de_pynite((n.RxnFX[k], n.RxnFY[k], n.RxnFZ[k]))
             M = _de_pynite((n.RxnMX[k], n.RxnMY[k], n.RxnMZ[k]))
             res.reacciones[k][a.nodo] = [*F, *M]
+    return res
+
+
+_CASO_MASA = "__masa__"
+
+
+def modal(modelo: Edificio, n_modos: int = 12) -> Modos:
+    """Análisis modal con las masas nodales de `masas_nodales` (traslacionales)."""
+    masas = masas_nodales(modelo)
+    if not masas:
+        raise ValueError("el modelo no tiene masa: define fuente_masa, peso propio o masas nodales")
+    fem = construir(modelo)
+    for nodo, m in masas.items():
+        # PyNite convierte en masa las cargas en la dirección vertical (su eje Y)
+        fem.add_node_load(nodo, "FY", -m * G, case=_CASO_MASA)
+    fem.add_load_combo(_CASO_MASA, {_CASO_MASA: 1.0})
+    fem.analyze_modal(num_modes=n_modos, mass_combo_name=_CASO_MASA, mass_direction="Y", gravity=G)
+
+    res = Modos(motor="pynite")
+    orden = sorted(range(len(fem.frequencies)), key=lambda i: fem.frequencies[i])
+    for i in orden:
+        k = f"Mode {i + 1}"
+        res.periodos.append(1.0 / float(fem.frequencies[i]) if fem.frequencies[i] > 0 else math.inf)
+        forma = {}
+        for nid, n in fem.nodes.items():
+            d = _de_pynite((n.DX[k], n.DY[k], n.DZ[k]))
+            r = _de_pynite((n.RX[k], n.RY[k], n.RZ[k]))
+            forma[nid] = [float(v) for v in (*d, *r)]
+        res.formas.append(forma)
     return res

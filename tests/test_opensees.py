@@ -26,3 +26,15 @@ def test_script_generado_es_autonomo(marco, tmp_path):
     texto = opensees.generar_script(marco)
     assert "import openseespy.opensees as ops" in texto
     compile(texto, "modelo_opensees.py", "exec")
+
+
+def test_modal_y_espectral_coinciden_entre_motores(marco):
+    from estruc_mx.analisis.espectral import espectral
+
+    mp = pynite.modal(marco, 9)
+    mo = opensees.modal(marco, 9)
+    assert mo.periodos == pytest.approx(mp.periodos, rel=1e-4)
+    for d in ("X", "Y"):
+        rp, ro = espectral(marco, mp, d), espectral(marco, mo, d)
+        assert ro.cortante_basal == pytest.approx(rp.cortante_basal, rel=1e-4)
+        assert [x.deriva for x in ro.derivas] == pytest.approx([x.deriva for x in rp.derivas], rel=1e-4)

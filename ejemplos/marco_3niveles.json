@@ -790,5 +790,21 @@
         "SY": 1.0
       }
     }
-  ]
+  ],
+  "fuente_masa": {
+    "CM": 1.0
+  },
+  "peso_propio_en_masa": true,
+  "masas_nodales": [],
+  "espectro": {
+    "tipo": "ntc",
+    "nombre": "Ilustrativo",
+    "a0": 0.15,
+    "c": 0.45,
+    "Ta": 0.4,
+    "Tb": 1.2,
+    "k": 1.0,
+    "beta": 1.0,
+    "reduccion": 1.0
+  }
 }

@@ -9,8 +9,10 @@ Estado: **fase 0, prueba de concepto**. El plan completo está en el documento d
 - **Modelo de datos** (`src/estruc_mx/modelo`): materiales, secciones, nodos, barras, apoyos, patrones de carga, cargas nodales y distribuidas, y combinaciones. Se guarda en JSON y valida que todas las referencias existan. Incluye un generador de marcos regulares a partir de ejes y alturas de entrepiso.
 - **Motor PyNite** (`motores/pynite.py`): análisis estático lineal dentro de la aplicación.
 - **Motor OpenSees** (`motores/opensees.py`): genera un script OpenSeesPy legible y lo ejecuta en un proceso aparte. El script se puede exportar, editar y correr por separado.
+- **Masas y espectro** (`modelo/masas.py`, `modelo/espectro.py`): masas nodales a partir de patrones de carga, peso propio y masas explícitas; espectro tabular (por ejemplo, el de SASID o PRODISIS) o paramétrico de las NTC Sismo.
+- **Análisis modal espectral** (`analisis/espectral.py`): periodos, factores de participación, masa efectiva, combinación SRSS o CQC, cortante basal y derivas por nivel. Independiente del motor.
 - **Vista 3D** (`visual/vista3d.py`): modelo y deformada con PyVista/VTK.
-- **Pruebas**: soluciones exactas, equilibrio y comparación PyNite contra OpenSees en un marco 3D de 3 niveles, con columnas giradas 0°, 30° y 90°. Ambos motores coinciden con tolerancia relativa de 1e-4.
+- **Pruebas**: soluciones exactas, equilibrio y comparación PyNite contra OpenSees en un marco 3D de 3 niveles, con columnas giradas 0°, 30° y 90°. Ambos motores coinciden con tolerancia relativa de 1e-4, también en periodos, cortante basal y derivas del análisis espectral.
 
 ## Requisitos
 
@@ -31,13 +33,15 @@ estruc-mx analizar ejemplos/marco_3niveles.json --motor pynite
 estruc-mx analizar ejemplos/marco_3niveles.json --motor opensees
 estruc-mx script ejemplos/marco_3niveles.json -o modelo_opensees.py
 estruc-mx ver ejemplos/marco_3niveles.json --combinacion "1.1CM+SX"
+estruc-mx modal ejemplos/marco_3niveles.json --modos 12 --motor opensees
+estruc-mx espectral ejemplos/marco_3niveles.json --direccion X --metodo CQC
 
 python -m pytest
 ```
 
 ## Siguientes pasos de la fase 0
 
-1. Análisis modal y espectral (espectro NTC Sismo / CFE) en ambos motores.
+1. ~~Análisis modal y espectral en ambos motores.~~ Hecho; falta la forma paramétrica del espectro CFE.
 2. Muros como placas en PyNite.
 3. Ventana PySide6 con la vista VTK integrada.
 4. Reporte mínimo (HTML a PDF).

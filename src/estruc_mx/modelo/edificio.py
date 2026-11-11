@@ -19,6 +19,8 @@ from typing import Annotated, Literal, Union
 import numpy as np
 from pydantic import BaseModel, Field, model_validator
 
+from .espectro import Espectro
+
 
 class Material(BaseModel):
     nombre: str
@@ -121,6 +123,11 @@ class CargaDistribuida(BaseModel):
     w: float = Field(description="kN/m; negativo en Z es gravedad")
 
 
+class MasaNodal(BaseModel):
+    nodo: str
+    masa: float = Field(gt=0, description="t (kN·s²/m), traslacional en X, Y y Z")
+
+
 class Combinacion(BaseModel):
     nombre: str
     factores: dict[str, float]
@@ -137,6 +144,11 @@ class Edificio(BaseModel):
     cargas_nodales: list[CargaNodal] = []
     cargas_distribuidas: list[CargaDistribuida] = []
     combinaciones: list[Combinacion] = []
+    # Masa para análisis dinámico (ver modelo/masas.py)
+    fuente_masa: dict[str, float] = Field(default_factory=dict, description="patrón -> factor")
+    peso_propio_en_masa: bool = True
+    masas_nodales: list[MasaNodal] = []
+    espectro: Espectro | None = None
 
     # --- búsquedas ---------------------------------------------------------
     def material(self, nombre: str) -> Material:
@@ -200,6 +212,12 @@ class Edificio(BaseModel):
                 errores.append(f"carga distribuida: barra '{c.barra}' no existe")
             if c.patron not in pats:
                 errores.append(f"carga distribuida: patrón '{c.patron}' no existe")
+        for p in self.fuente_masa:
+            if p not in pats:
+                errores.append(f"fuente_masa: patrón '{p}' no existe")
+        for mn in self.masas_nodales:
+            if mn.nodo not in nods:
+                errores.append(f"masa nodal: nodo '{mn.nodo}' no existe")
         for co in self.combinaciones:
             for p in co.factores:
                 if p not in pats:

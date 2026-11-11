@@ -2,6 +2,7 @@ import pytest
 
 from estruc_mx.modelo import (
     CargaDistribuida,
+    EspectroNTC,
     CargaNodal,
     Combinacion,
     Material,
@@ -31,6 +32,9 @@ def construir_marco(rotacion_columnas: float = 0.0):
             Combinacion(nombre="1.1CM+SX", factores={"CM": 1.1, "SX": 1.0}),
             Combinacion(nombre="1.1CM+SY", factores={"CM": 1.1, "SY": 1.0}),
         ],
+        fuente_masa={"CM": 1.0},
+        # Parámetros ilustrativos, no corresponden a un sitio real.
+        espectro=EspectroNTC(nombre="Ilustrativo", a0=0.15, c=0.45, Ta=0.4, Tb=1.2, k=1.0),
     )
     for b in m.barras:
         if b.tipo == "viga":
