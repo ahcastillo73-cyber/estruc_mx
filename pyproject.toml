@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[project]
+name = "estruc-mx"
+version = "0.1.0"
+description = "Análisis estructural de edificios con PyNite y OpenSees, basado en NTC 2023 y CFE"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.26",
+    "pydantic>=2.6",
+    "PyNiteFEA>=3.2",
+]
+
+[project.optional-dependencies]
+opensees = ["openseespy>=3.7"]
+visual = ["pyvista>=0.44"]
+dev = ["pytest>=8"]
+
+[project.scripts]
+estruc-mx = "estruc_mx.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/estruc_mx"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

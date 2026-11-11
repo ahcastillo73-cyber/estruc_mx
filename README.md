@@ -1,3 +1,40 @@
 # estruc_mx
 
-Herramienta de análisis estructural de edificios con interfaz gráfica, multiplataforma (Linux, macOS y Windows), basada en motores abiertos (PyNite y OpenSees) y en la normativa mexicana (NTC 2023 y manuales CFE).
+Herramienta de análisis estructural de edificios, multiplataforma (Linux, macOS y Windows), basada en motores abiertos y en la normativa mexicana (NTC 2023 y manuales CFE; AISC, ACI y FEMA donde haya lagunas). Es de uso propio.
+
+Estado: **fase 0, prueba de concepto**. El plan completo está en el documento de viabilidad del proyecto.
+
+## Qué hay ahora
+
+- **Modelo de datos** (`src/estruc_mx/modelo`): materiales, secciones, nodos, barras, apoyos, patrones de carga, cargas nodales y distribuidas, y combinaciones. Se guarda en JSON y valida que todas las referencias existan. Incluye un generador de marcos regulares a partir de ejes y alturas de entrepiso.
+- **Motor PyNite** (`motores/pynite.py`): análisis estático lineal dentro de la aplicación.
+- **Motor OpenSees** (`motores/opensees.py`): genera un script OpenSeesPy legible y lo ejecuta en un proceso aparte. El script se puede exportar, editar y correr por separado.
+- **Vista 3D** (`visual/vista3d.py`): modelo y deformada con PyVista/VTK.
+- **Pruebas**: soluciones exactas, equilibrio y comparación PyNite contra OpenSees en un marco 3D de 3 niveles, con columnas giradas 0°, 30° y 90°. Ambos motores coinciden con tolerancia relativa de 1e-4.
+
+## Convenciones
+
+- Unidades: kN, m, kPa.
+- Ejes globales: Z vertical hacia arriba.
+- Ejes locales de barra: x de i a j. En vigas, y apunta hacia arriba y la inercia mayor (I33) resiste la gravedad. En columnas que suben, y = −X global. `rotacion` gira y, z alrededor de x.
+
+## Uso
+
+```bash
+python -m pip install -e ".[dev,visual,opensees]"
+
+estruc-mx analizar ejemplos/marco_3niveles.json --motor pynite
+estruc-mx analizar ejemplos/marco_3niveles.json --motor opensees
+estruc-mx script ejemplos/marco_3niveles.json -o modelo_opensees.py
+estruc-mx ver ejemplos/marco_3niveles.json --combinacion "1.1CM+SX"
+
+python -m pytest
+```
+
+## Siguientes pasos de la fase 0
+
+1. Análisis modal y espectral (espectro NTC Sismo / CFE) en ambos motores.
+2. Muros como placas en PyNite.
+3. Ventana PySide6 con la vista VTK integrada.
+4. Reporte mínimo (HTML a PDF).
+5. Instaladores automáticos para Linux (AppImage), macOS (.dmg) y Windows (.exe).
