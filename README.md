@@ -11,6 +11,7 @@ Estado: **fase 0, prueba de concepto**. El plan completo está en el documento d
 - **Motor OpenSees** (`motores/opensees.py`): genera un script OpenSeesPy legible y lo ejecuta en un proceso aparte. El script se puede exportar, editar y correr por separado.
 - **Masas y espectro** (`modelo/masas.py`, `modelo/espectro.py`): masas nodales a partir de patrones de carga, peso propio y masas explícitas; espectro tabular (por ejemplo, el de SASID o PRODISIS) o paramétrico de las NTC Sismo.
 - **Análisis modal espectral** (`analisis/espectral.py`): periodos, factores de participación, masa efectiva, combinación SRSS o CQC, cortante basal y derivas por nivel. Independiente del motor.
+- **Reporte** (`reporte/`): PDF o Word con datos del modelo, cargas y combinaciones, espectro, resultados modales, cortante basal, distorsiones contra los límites de las NTC y figuras de deformadas. Está hecho por bloques: cada sección es una función que devuelve títulos, párrafos, tablas y figuras, y los renderizadores PDF (ReportLab) y Word (python-docx) solo dibujan bloques. Para añadir una sección basta registrarla en `reporte/secciones.py`.
 - **Vista 3D** (`visual/vista3d.py`): modelo y deformada con PyVista/VTK.
 - **Pruebas**: soluciones exactas, equilibrio y comparación PyNite contra OpenSees en un marco 3D de 3 niveles, con columnas giradas 0°, 30° y 90°. Ambos motores coinciden con tolerancia relativa de 1e-4, también en periodos, cortante basal y derivas del análisis espectral.
 
@@ -27,7 +28,7 @@ Python 3.12 o posterior: OpenSeesPy 3.8, la primera versión con binarios para W
 ## Uso
 
 ```bash
-python -m pip install -e ".[dev,visual,opensees]"
+python -m pip install -e ".[dev,visual,opensees,reporte]"
 
 estruc-mx analizar ejemplos/marco_3niveles.json --motor pynite
 estruc-mx analizar ejemplos/marco_3niveles.json --motor opensees
@@ -35,6 +36,9 @@ estruc-mx script ejemplos/marco_3niveles.json -o modelo_opensees.py
 estruc-mx ver ejemplos/marco_3niveles.json --combinacion "1.1CM+SX"
 estruc-mx modal ejemplos/marco_3niveles.json --modos 12 --motor opensees
 estruc-mx espectral ejemplos/marco_3niveles.json --direccion X --metodo CQC
+estruc-mx reporte ejemplos/marco_3niveles.json -o reporte.pdf --sistema marco_ductil_concreto
+estruc-mx reporte ejemplos/marco_3niveles.json -o reporte.docx --secciones modelo,modal,derivas
+estruc-mx reporte --sistemas   # sistemas estructurales y su distorsión límite
 
 python -m pytest
 ```
@@ -44,5 +48,5 @@ python -m pytest
 1. ~~Análisis modal y espectral en ambos motores.~~ Hecho; falta la forma paramétrica del espectro CFE.
 2. Muros como placas en PyNite.
 3. Ventana PySide6 con la vista VTK integrada.
-4. Reporte mínimo (HTML a PDF).
+4. ~~Reporte mínimo.~~ Hecho en PDF y Word; falta la revisión de limitación de daños (servicio) y el cortante mínimo de las NTC.
 5. Instaladores automáticos para Linux (AppImage), macOS (.dmg) y Windows (.exe).
