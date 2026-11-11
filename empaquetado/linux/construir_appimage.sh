@@ -14,6 +14,9 @@ cp empaquetado/linux/estruc-mx.desktop "$APPDIR/usr/share/applications/"
 cp empaquetado/linux/estruc-mx.png "$APPDIR/estruc-mx.png"
 cp empaquetado/linux/estruc-mx.png "$APPDIR/usr/share/icons/hicolor/256x256/apps/"
 ln -sf estruc-mx.png "$APPDIR/.DirIcon"
+# Licencia y avisos de terceros, también visibles fuera de la carpeta de PyInstaller
+mkdir -p "$APPDIR/usr/share/doc/estruc-mx"
+cp LICENSE AVISOS_TERCEROS.md "$APPDIR/usr/share/doc/estruc-mx/"
 
 HERRAMIENTA=build/appimagetool-x86_64.AppImage
 if [ ! -x "$HERRAMIENTA" ]; then

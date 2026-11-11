@@ -1,6 +1,6 @@
 # estruc_mx
 
-Herramienta de análisis estructural de edificios, multiplataforma (Linux, macOS y Windows), basada en motores abiertos y en la normativa mexicana (NTC 2023 y manuales CFE; AISC, ACI y FEMA donde haya lagunas). Es de uso propio.
+Herramienta de análisis estructural de edificios, multiplataforma (Linux, macOS y Windows), basada en motores abiertos y en la normativa mexicana (NTC 2023 y manuales CFE; AISC, ACI y FEMA donde haya lagunas). Es software libre bajo la licencia GPL-3.0-or-later (ver [Licencia](#licencia)).
 
 Estado: **fase 0, prueba de concepto**. El plan completo está en el documento de viabilidad del proyecto.
 
@@ -80,3 +80,14 @@ La CI genera tres instaladores con Python 3.12, OpenSeesPy, PyNite, el reporte y
 3. ~~Ventana PySide6 con la vista VTK integrada.~~ Hecho, con edición del modelo (rejilla, dibujo, selección, propiedades, deshacer). Con replicar entre niveles, cargas dibujadas, diafragmas rígidos y edición de muros.
 4. ~~Reporte mínimo.~~ Hecho en PDF y Word, con la revisión sísmica (cortante mínimo, torsión accidental, 100/30, distorsiones) de la NTC Sismo 2023.
 5. ~~Instaladores automáticos para Linux (AppImage), macOS (.dmg) y Windows (.exe).~~ Hecho; sin firma de código.
+
+## Licencia
+
+estruc_mx es software libre bajo la **GNU GPL versión 3 o posterior** (GPL-3.0-or-later); el texto completo está en [`LICENSE`](LICENSE). Puedes usarlo, estudiarlo, modificarlo y compartirlo, incluso con fines comerciales, siempre que quien distribuya una versión, modificada o no, entregue también su código fuente bajo la misma licencia. Se ofrece sin garantía, y sus resultados no sustituyen el criterio ni la responsabilidad del ingeniero que firma un proyecto.
+
+Los motores de análisis tienen licencias propias:
+
+- **OpenSees y OpenSeesPy** no son software libre en el mismo sentido. OpenSees es de The Regents of the University of California (UC Berkeley) y se permite usarlo con fines educativos, de investigación y sin fines de lucro; OpenSeesPy es libre para investigación, educación y uso interno, y su redistribución comercial (una aplicación o un servicio que haga `import openseespy`) requiere una licencia comercial. Para que estruc_mx pueda combinarse con OpenSees pese a esa diferencia, la licencia incluye un permiso adicional (sección 7 de la GPL), descrito en [`AVISOS_TERCEROS.md`](AVISOS_TERCEROS.md). Como los instaladores incluyen OpenSeesPy, **venderlos o redistribuirlos comercialmente requiere esa licencia comercial**; para uso propio, docencia o investigación no hace falta. OpenSeesPy es opcional (extra `opensees`) y sin él estruc_mx funciona con PyNite.
+- **PyNite** (`PyNiteFEA`) es MIT y no tiene esa restricción.
+
+Los avisos y licencias del resto de componentes que acompañan a los instaladores (Qt/PySide6 con LGPL-3.0, VTK, NumPy, ReportLab, etc.) están en [`AVISOS_TERCEROS.md`](AVISOS_TERCEROS.md). Los instaladores llevan `LICENSE` y `AVISOS_TERCEROS.md`, y cada paquete incluido conserva su licencia en su carpeta `*.dist-info`.
