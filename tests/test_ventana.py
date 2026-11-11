@@ -240,3 +240,24 @@ def test_replicar_diafragmas_y_editar_muro_desde_la_ventana(ventana):
     # Las cargas de cada patrón aparecen en «Ver»
     assert {"Cargas: CM", "Cargas: CV"} <= set(items(ventana.selector_vista))
     assert ventana.tabla_de_vista("Cargas: CM") is None
+
+
+def test_revisar_mamposteria_colorea_tabla_y_vista(ventana):
+    casa = str(Path(EJEMPLO).with_name("casa_mamposteria.json"))
+    ventana.abrir(casa)
+    assert ventana.accion_mamposteria.isEnabled()
+    ventana.n_modos.setValue(6)
+    ventana.ejecutar_mamposteria()
+    assert ventana.selector_tabla.currentText() == "Mampostería: muros"
+    assert ventana.tabla.rowCount() == 18
+    columnas = [ventana.tabla.horizontalHeaderItem(j).text() for j in range(ventana.tabla.columnCount())]
+    estado = columnas.index("Estado")
+    colores = {ventana.tabla.item(i, estado).text(): ventana.tabla.item(i, estado).background().color().name()
+               for i in range(ventana.tabla.rowCount())}
+    assert colores["cumple"] != colores["no cumple"]  # hay muros que cumplen y que no
+    assert "Mampostería: demanda/capacidad" in items(ventana.selector_vista)
+    for t in ("Mampostería: revisiones", "Mampostería: entrepisos"):
+        ventana.selector_tabla.setCurrentText(t)
+        assert ventana.tabla.rowCount() > 0
+    ventana.sesion.limpiar_resultados()
+    assert ventana.sesion.mamposteria is None and ventana.sesion.revision is None

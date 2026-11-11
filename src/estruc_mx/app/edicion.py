@@ -42,6 +42,8 @@ _TITULOS_DEFINIR = {
     "secciones_area": "Secciones de muro y losa",
     "patrones": "Patrones de carga",
     "combinaciones": "Combinaciones de carga",
+    "mamposteria": "Propiedades de mampostería (NTC)",
+    "refuerzo_muros": "Refuerzo de muros de mampostería (NTC)",
 }
 
 
@@ -646,7 +648,12 @@ class EdicionMixin:
 
     def hacer_definir(self, coleccion: str, filas: list[list[str]], renombres: dict[str, str] | None = None) -> None:
         """Reemplaza una colección con filas de texto; lanza ValueError si no es válida."""
-        self.sesion.editor.reemplazar(coleccion, dfn.objetos(coleccion, filas), renombres)
+        m = self.sesion.modelo
+        objetos = dfn.objetos(coleccion, filas, m, renombres)
+        if coleccion in dfn.COLECCION_DEL_MODELO:
+            self.sesion.editor.reemplazar(dfn.COLECCION_DEL_MODELO[coleccion], objetos)
+        else:
+            self.sesion.editor.reemplazar(coleccion, objetos, renombres)
 
     def _dialogo_definir(self, coleccion: str) -> None:
         m = self.sesion.modelo
@@ -656,7 +663,15 @@ class EdicionMixin:
             nota="Al renombrar, el nuevo nombre se aplica en todo el modelo. "
             + {
                 "secciones": "Las secciones rectangulares solo usan b y h; las generales, A, I33, I22 y J.",
-                "secciones_area": "Mod. rigidez multiplica E en membrana y flexión (p. ej. 0.5 para muros agrietados).",
+                "secciones_area": "Mod. rigidez multiplica E en membrana y flexión (p. ej. 0.5 para muros agrietados). "
+                "Mod. cortante multiplica además el módulo de cortante en el plano (0.5 en muros de mampostería "
+                "agrietados, NTC Mampostería 3.1.1.2.3). En mampostería G = 0.2·E (2.8.6.4.1).",
+                "mamposteria": "Una fila por material de tipo mampostería. f'm y v'm de diseño sobre área bruta "
+                "(ensayes de pilas y muretes, 2.8.1 y 2.8.2). Si se deja f'm vacío y se da f'p, f'm sale de las "
+                "tablas 2.8.1.4.1 o 2.8.1.4.2. Sin fila se usan los valores de las tablas 12.2.3 (Tipo II).",
+                "refuerzo_muros": "Una fila por sección de muro de mampostería. Castillos externos en los extremos e "
+                "intersecciones; refuerzo horizontal Ash cada sh (vacío o 0 = sin refuerzo). pv·fyv y fnm solo para "
+                "muros reforzados interiormente. Sin fila: confinado, castillos 15 × 15 con 4 #3.",
             }.get(coleccion, ""),
         )
         d.exec()

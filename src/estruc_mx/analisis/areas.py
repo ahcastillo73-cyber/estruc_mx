@@ -102,7 +102,7 @@ def todas_fuerzas_muros(modelo: Edificio, malla: Malla, fuerzas: dict[str, list[
 
 
 def esfuerzos_elemento(
-    p: np.ndarray, u: np.ndarray, ejes, E: float, nu: float, t: float
+    p: np.ndarray, u: np.ndarray, ejes, E: float, nu: float, t: float, G: float | None = None
 ) -> list[float]:
     """[N11, N22, N12, M11, M22, M12] en el centro de un cuadrilátero con nodos p (4, 3)
     y desplazamientos u (4, 6) globales."""
@@ -118,7 +118,8 @@ def esfuerzos_elemento(
     ex, ey = dN[0] @ u1, dN[1] @ u2
     gxy = dN[1] @ u1 + dN[0] @ u2
     C = E * t / (1 - nu**2)
-    N = [C * (ex + nu * ey), C * (ey + nu * ex), C * (1 - nu) / 2 * gxy]
+    G = E / (2 * (1 + nu)) if G is None else G  # cortante en el plano (0.2·Em en mampostería)
+    N = [C * (ex + nu * ey), C * (ey + nu * ex), G * t * gxy]
     wxx = -(dN[0] @ t2)
     wyy = dN[1] @ t1
     wxy = (dN[0] @ t1 - dN[1] @ t2) / 2
@@ -132,13 +133,13 @@ def esfuerzos_areas(modelo: Edificio, malla: Malla, desplazamientos: dict[str, l
     out: dict[str, dict[str, list[float]]] = {}
     for a in modelo.areas:
         s = modelo.seccion_area(a.seccion)
-        mat = modelo.material(s.material)
+        E, nu, Gp = modelo.modulos_area(s)
         ejes = modelo.ejes_area(a)
         tabla = out.setdefault(a.id, {})
         for e in malla.elementos_de(a.id):
             p = np.array([malla.nodos[n] for n in e.nodos])
             u = np.array([desplazamientos[n] for n in e.nodos], dtype=float)
-            tabla[e.id] = esfuerzos_elemento(p, u, ejes, mat.E * s.mod_rigidez, mat.nu, s.espesor)
+            tabla[e.id] = esfuerzos_elemento(p, u, ejes, E, nu, s.espesor, Gp)
     return out
 
 

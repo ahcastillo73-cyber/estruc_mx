@@ -25,15 +25,55 @@ from pydantic import BaseModel, Field, model_validator
 from .espectro import Espectro
 
 
+# NTC Mampostería 2023, ec. 2.8.6.4.1: Gm = 0.2·Em cuando Em sale de 2.8.5.4
+RELACION_G_MAMPOSTERIA = 0.2
+
+
+class PropiedadesMamposteria(BaseModel):
+    """Datos de diseño de la mampostería (NTC Mampostería 2023, capítulo 2). Esfuerzos en kPa.
+
+    f'm y v'm son de diseño, sobre área bruta: de ensayes de pilas y muretes (2.8.1.3, 2.8.2.4)
+    o de las tablas de la norma (ver `normas/ntc_mamposteria.py`)."""
+
+    pieza: Literal[
+        "tabique_arcilla_artesanal", "tabique_arcilla_extruido", "bloque_concreto", "tabicon_concreto",
+        "otra_arcilla", "otra_concreto",
+    ] = "tabique_arcilla_artesanal"
+    hueca: bool = Field(False, description="Pieza hueca (área neta/bruta < 0.75, tabla 2.1.1.2)")
+    fan: float = Field(1.0, gt=0, le=1.0, description="Área neta / área bruta de la pieza")
+    mortero: Literal["I", "II"] = "I"
+    fp: float | None = Field(None, gt=0, description="f'p de diseño de la pieza, kPa (opcional, solo informativo)")
+    fm: float = Field(gt=0, description="f'm, resistencia de diseño a compresión, kPa")
+    vm: float = Field(gt=0, description="v'm, resistencia de diseño a compresión diagonal, kPa")
+
+    @property
+    def de_concreto(self) -> bool:
+        return self.pieza in ("bloque_concreto", "tabicon_concreto", "otra_concreto")
+
+
 class Material(BaseModel):
     nombre: str
     tipo: Literal["concreto", "acero", "mamposteria", "generico"] = "generico"
     E: float = Field(gt=0, description="Módulo de elasticidad, kPa")
     nu: float = Field(0.2, ge=0, lt=0.5, description="Relación de Poisson")
     peso_vol: float = Field(0.0, ge=0, description="Peso volumétrico, kN/m³")
+    G_cortante: float | None = Field(
+        None, gt=0,
+        description="Módulo de cortante explícito, kPa. Sin él: 0.2·E en mampostería (NTC Mampostería "
+                    "2.8.6.4.1) y E/(2(1 + ν)) en los demás materiales",
+    )
+    mamposteria: PropiedadesMamposteria | None = None
 
     @property
     def G(self) -> float:
+        if self.G_cortante is not None:
+            return self.G_cortante
+        if self.tipo == "mamposteria":
+            return RELACION_G_MAMPOSTERIA * self.E
+        return self.E / (2.0 * (1.0 + self.nu))
+
+    @property
+    def G_isotropo(self) -> float:
         return self.E / (2.0 * (1.0 + self.nu))
 
 
@@ -76,6 +116,43 @@ class SeccionGeneral(_SeccionBase):
 Seccion = Annotated[Union[SeccionRectangular, SeccionGeneral], Field(discriminator="forma")]
 
 
+class RefuerzoMuroMamposteria(BaseModel):
+    """Modalidad y refuerzo de un muro de mampostería (NTC Mampostería 2023, capítulos 6 y 7).
+
+    Unidades del modelo: m, m², kPa. Los castillos se suponen en los extremos del muro y en las
+    intersecciones (6.2.1.1), con los intermedios que pida la separación máxima."""
+
+    modalidad: Literal["confinada", "reforzada_interior", "no_reforzada"] = "confinada"
+    # Castillos (o refuerzo vertical de extremo en muros reforzados interiormente)
+    castillo_b: float = Field(0.15, gt=0, description="bc, dimensión perpendicular al muro, m")
+    castillo_h: float = Field(0.15, gt=0, description="hc, dimensión paralela al muro, m")
+    castillo_As: float = Field(2.85e-4, ge=0, description="Acero longitudinal de un castillo, m² (4 #3 = 2.85 cm²)")
+    castillo_barras: int = Field(4, ge=0, description="Número de barras longitudinales del castillo")
+    castillo_fy: float = Field(412e3, gt=0, description="fy del acero longitudinal, kPa")
+    castillo_fc: float = Field(20e3, gt=0, description="f'c del concreto de castillos y dalas, kPa")
+    estribo_Asc: float = Field(0.62e-4, ge=0, description="Asc, área de las dos ramas del estribo, m²")
+    estribo_fy: float = Field(412e3, gt=0, description="fy de los estribos, kPa")
+    estribo_s: float = Field(0.20, gt=0, description="Separación de estribos en el tramo central, m")
+    estribo_s_extremo: float = Field(0.075, gt=0, description="Separación de estribos en los extremos (Ho), m")
+    # Dalas
+    dala_b: float = Field(0.15, gt=0, description="Ancho de la dala, m")
+    dala_h: float = Field(0.20, gt=0, description="Peralte de la dala, m (o el de la losa si es de 10 cm o más)")
+    # Refuerzo horizontal en las juntas
+    Ash: float = Field(0.0, ge=0, description="Área de refuerzo horizontal por junta reforzada, m²")
+    sh: float = Field(0.0, ge=0, description="Separación vertical del refuerzo horizontal, m (0 = sin refuerzo)")
+    fyh: float = Field(412e3, gt=0, description="fyh del refuerzo horizontal, kPa (≤ 600 MPa)")
+    junta: float = Field(0.012, gt=0, description="hj, espesor de la junta horizontal de mortero, m")
+    # Solo para muros reforzados interiormente: cuantía vertical × fy (7.1.5.1)
+    pv_fyv: float = Field(0.0, ge=0, description="pv·fyv del refuerzo vertical interior, kPa")
+    fnm: float = Field(1.0, gt=0, le=1.0, description="Área neta / bruta del muro reforzado interiormente (7.4.3.3)")
+
+    def ph_fyh(self, t: float) -> float:
+        """ph·fyh (kPa) con ph = Ash/(sh·t), ec. 6.5.3.4.1.b; 0 sin refuerzo horizontal."""
+        if self.sh <= 0 or self.Ash <= 0:
+            return 0.0
+        return self.Ash / (self.sh * t) * self.fyh
+
+
 class SeccionArea(BaseModel):
     """Sección de muro o losa: material y espesor. Se analiza como cáscara elástica
     (membrana más placa)."""
@@ -88,6 +165,12 @@ class SeccionArea(BaseModel):
         1.0, gt=0, le=1.0,
         description="Multiplica E en membrana y flexión, p. ej. 0.5 para muros agrietados (NTC Concreto)",
     )
+    mod_cortante: float = Field(
+        1.0, gt=0, le=1.0,
+        description="Multiplica además el módulo de cortante en el plano, p. ej. 0.5 para muros de "
+                    "mampostería agrietados (NTC Mampostería 3.1.1.2.3)",
+    )
+    mamposteria: RefuerzoMuroMamposteria | None = None
 
 
 class Nodo(BaseModel):
@@ -125,6 +208,9 @@ class Area(BaseModel):
     tipo: Literal["muro", "losa"] = "muro"
     nodos: tuple[str, str, str, str]
     seccion: str
+    # Muro extremo (en el perímetro, con losa de un solo lado) para el factor FE de la NTC
+    # Mampostería 3.1.2.3; None = se decide por su posición en la planta
+    extremo: bool | None = None
 
 
 class PatronCarga(BaseModel):
@@ -461,6 +547,16 @@ class Edificio(BaseModel):
         """Área (m²) del cuadrilátero."""
         c = self.esquinas(area)
         return 0.5 * float(np.linalg.norm(np.cross(c[2] - c[0], c[3] - c[1])))
+
+    def modulos_area(self, seccion: SeccionArea) -> tuple[float, float, float]:
+        """(E, ν, G) de la cáscara de una sección de muro o losa, con sus modificadores.
+
+        G es el módulo de cortante en el plano; en mampostería 0.2·Em (NTC Mampostería
+        2.8.6.4.1), que un material isótropo no puede dar, así que los motores usan entonces un
+        material ortótropo con ese G en el plano."""
+        m = self.material(seccion.material)
+        E = m.E * seccion.mod_rigidez
+        return E, m.nu, m.G * seccion.mod_rigidez * seccion.mod_cortante
 
     def ejes_area(self, area: Area) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Ejes locales (1, 2, 3) de un muro o losa, en ejes globales.

@@ -6,14 +6,26 @@
       "tipo": "concreto",
       "E": 22000000.0,
       "nu": 0.2,
-      "peso_vol": 24.0
+      "peso_vol": 24.0,
+      "G_cortante": null,
+      "mamposteria": null
     },
     {
       "nombre": "Tabique rojo",
       "tipo": "mamposteria",
-      "E": 880000.0,
+      "E": 900000.0,
       "nu": 0.25,
-      "peso_vol": 15.0
+      "peso_vol": 15.0,
+      "G_cortante": null,
+      "mamposteria": {
+        "pieza": "tabique_arcilla_artesanal",
+        "hueca": false,
+        "fan": 1.0,
+        "mortero": "I",
+        "fp": null,
+        "fm": 1500.0,
+        "vm": 200.0
+      }
     }
   ],
   "secciones": [
@@ -52,21 +64,76 @@
       "material": "Concreto f'c 250",
       "tipo": "muro",
       "espesor": 0.15,
-      "mod_rigidez": 1.0
+      "mod_rigidez": 1.0,
+      "mod_cortante": 1.0,
+      "mamposteria": null
     },
     {
       "nombre": "Muro tabique 14",
       "material": "Tabique rojo",
       "tipo": "muro",
       "espesor": 0.14,
-      "mod_rigidez": 1.0
+      "mod_rigidez": 1.0,
+      "mod_cortante": 1.0,
+      "mamposteria": {
+        "modalidad": "confinada",
+        "castillo_b": 0.15,
+        "castillo_h": 0.15,
+        "castillo_As": 0.000285,
+        "castillo_barras": 4,
+        "castillo_fy": 412000.0,
+        "castillo_fc": 20000.0,
+        "estribo_Asc": 0.000062,
+        "estribo_fy": 412000.0,
+        "estribo_s": 0.2,
+        "estribo_s_extremo": 0.075,
+        "dala_b": 0.15,
+        "dala_h": 0.2,
+        "Ash": 0.0,
+        "sh": 0.0,
+        "fyh": 412000.0,
+        "junta": 0.012,
+        "pv_fyv": 0.0,
+        "fnm": 1.0
+      }
     },
     {
       "nombre": "Losa 10",
       "material": "Concreto f'c 250",
       "tipo": "losa",
       "espesor": 0.1,
-      "mod_rigidez": 1.0
+      "mod_rigidez": 1.0,
+      "mod_cortante": 1.0,
+      "mamposteria": null
+    },
+    {
+      "nombre": "Muro tabique 14 agrietado",
+      "material": "Tabique rojo",
+      "tipo": "muro",
+      "espesor": 0.14,
+      "mod_rigidez": 1.0,
+      "mod_cortante": 0.5,
+      "mamposteria": {
+        "modalidad": "confinada",
+        "castillo_b": 0.15,
+        "castillo_h": 0.15,
+        "castillo_As": 0.000285,
+        "castillo_barras": 4,
+        "castillo_fy": 412000.0,
+        "castillo_fc": 20000.0,
+        "estribo_Asc": 0.000062,
+        "estribo_fy": 412000.0,
+        "estribo_s": 0.2,
+        "estribo_s_extremo": 0.075,
+        "dala_b": 0.15,
+        "dala_h": 0.2,
+        "Ash": 0.0,
+        "sh": 0.0,
+        "fyh": 412000.0,
+        "junta": 0.012,
+        "pv_fyv": 0.0,
+        "fnm": 1.0
+      }
     }
   ],
   "nodos": [
@@ -581,7 +648,8 @@
         "B2-N1",
         "A2-N1"
       ],
-      "seccion": "Losa 10"
+      "seccion": "Losa 10",
+      "extremo": null
     },
     {
       "id": "L2",
@@ -592,7 +660,8 @@
         "B3-N1",
         "A3-N1"
       ],
-      "seccion": "Losa 10"
+      "seccion": "Losa 10",
+      "extremo": null
     },
     {
       "id": "L3",
@@ -603,7 +672,8 @@
         "C2-N1",
         "B2-N1"
       ],
-      "seccion": "Losa 10"
+      "seccion": "Losa 10",
+      "extremo": null
     },
     {
       "id": "L4",
@@ -614,7 +684,8 @@
         "C3-N1",
         "B3-N1"
       ],
-      "seccion": "Losa 10"
+      "seccion": "Losa 10",
+      "extremo": null
     },
     {
       "id": "L5",
@@ -625,7 +696,8 @@
         "B2-N2",
         "A2-N2"
       ],
-      "seccion": "Losa 10"
+      "seccion": "Losa 10",
+      "extremo": null
     },
     {
       "id": "L6",
@@ -636,7 +708,8 @@
         "B3-N2",
         "A3-N2"
       ],
-      "seccion": "Losa 10"
+      "seccion": "Losa 10",
+      "extremo": null
     },
     {
       "id": "L7",
@@ -647,7 +720,8 @@
         "C2-N2",
         "B2-N2"
       ],
-      "seccion": "Losa 10"
+      "seccion": "Losa 10",
+      "extremo": null
     },
     {
       "id": "L8",
@@ -658,7 +732,8 @@
         "C3-N2",
         "B3-N2"
       ],
-      "seccion": "Losa 10"
+      "seccion": "Losa 10",
+      "extremo": null
     },
     {
       "id": "M1",
@@ -669,7 +744,8 @@
         "B1-N1",
         "A1-N1"
       ],
-      "seccion": "Muro tabique 14"
+      "seccion": "Muro tabique 14 agrietado",
+      "extremo": null
     },
     {
       "id": "M2",
@@ -680,7 +756,8 @@
         "C1-N1",
         "B1-N1"
       ],
-      "seccion": "Muro tabique 14"
+      "seccion": "Muro tabique 14 agrietado",
+      "extremo": null
     },
     {
       "id": "M3",
@@ -691,7 +768,8 @@
         "B3-N1",
         "A3-N1"
       ],
-      "seccion": "Muro tabique 14"
+      "seccion": "Muro tabique 14 agrietado",
+      "extremo": null
     },
     {
       "id": "M4",
@@ -702,7 +780,8 @@
         "C3-N1",
         "B3-N1"
       ],
-      "seccion": "Muro tabique 14"
+      "seccion": "Muro tabique 14 agrietado",
+      "extremo": null
     },
     {
       "id": "M5",
@@ -713,7 +792,8 @@
         "A2-N1",
         "A1-N1"
       ],
-      "seccion": "Muro tabique 14"
+      "seccion": "Muro tabique 14 agrietado",
+      "extremo": null
     },
     {
       "id": "M6",
@@ -724,7 +804,8 @@
         "A3-N1",
         "A2-N1"
       ],
-      "seccion": "Muro tabique 14"
+      "seccion": "Muro tabique 14 agrietado",
+      "extremo": null
     },
     {
       "id": "M7",
@@ -735,7 +816,8 @@
         "C2-N1",
         "C1-N1"
       ],
-      "seccion": "Muro tabique 14"
+      "seccion": "Muro tabique 14 agrietado",
+      "extremo": null
     },
     {
       "id": "M8",
@@ -746,7 +828,8 @@
         "C3-N1",
         "C2-N1"
       ],
-      "seccion": "Muro tabique 14"
+      "seccion": "Muro tabique 14 agrietado",
+      "extremo": null
     },
     {
       "id": "M9",
@@ -757,7 +840,8 @@
         "B2-N1",
         "B1-N1"
       ],
-      "seccion": "Muro tabique 14"
+      "seccion": "Muro tabique 14 agrietado",
+      "extremo": null
     },
     {
       "id": "M10",
@@ -768,7 +852,8 @@
         "B1-N2",
         "A1-N2"
       ],
-      "seccion": "Muro tabique 14"
+      "seccion": "Muro tabique 14",
+      "extremo": null
     },
     {
       "id": "M11",
@@ -779,7 +864,8 @@
         "C1-N2",
         "B1-N2"
       ],
-      "seccion": "Muro tabique 14"
+      "seccion": "Muro tabique 14",
+      "extremo": null
     },
     {
       "id": "M12",
@@ -790,7 +876,8 @@
         "B3-N2",
         "A3-N2"
       ],
-      "seccion": "Muro tabique 14"
+      "seccion": "Muro tabique 14",
+      "extremo": null
     },
     {
       "id": "M13",
@@ -801,7 +888,8 @@
         "C3-N2",
         "B3-N2"
       ],
-      "seccion": "Muro tabique 14"
+      "seccion": "Muro tabique 14",
+      "extremo": null
     },
     {
       "id": "M14",
@@ -812,7 +900,8 @@
         "A2-N2",
         "A1-N2"
       ],
-      "seccion": "Muro tabique 14"
+      "seccion": "Muro tabique 14",
+      "extremo": null
     },
     {
       "id": "M15",
@@ -823,7 +912,8 @@
         "A3-N2",
         "A2-N2"
       ],
-      "seccion": "Muro tabique 14"
+      "seccion": "Muro tabique 14",
+      "extremo": null
     },
     {
       "id": "M16",
@@ -834,7 +924,8 @@
         "C2-N2",
         "C1-N2"
       ],
-      "seccion": "Muro tabique 14"
+      "seccion": "Muro tabique 14",
+      "extremo": null
     },
     {
       "id": "M17",
@@ -845,7 +936,8 @@
         "C3-N2",
         "C2-N2"
       ],
-      "seccion": "Muro tabique 14"
+      "seccion": "Muro tabique 14",
+      "extremo": null
     },
     {
       "id": "M18",
@@ -856,7 +948,8 @@
         "B2-N2",
         "B1-N2"
       ],
-      "seccion": "Muro tabique 14"
+      "seccion": "Muro tabique 14",
+      "extremo": null
     }
   ],
   "apoyos": [
@@ -1105,6 +1198,8 @@
     "beta": 1.0,
     "reduccion": 3.0
   },
+  "espectro_servicio": null,
+  "diafragmas": [],
   "tamano_malla": 0.65,
   "rejilla": {
     "ejes_x": [

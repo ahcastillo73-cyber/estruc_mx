@@ -31,6 +31,8 @@ class Tabla:
     titulo: str
     columnas: list[str]
     filas: list[list[object]] = field(default_factory=list)
+    # Por fila: "cumple", "no cumple" o None, para colorear la tabla
+    estados: list[str | None] = field(default_factory=list)
 
 
 @dataclass
@@ -44,6 +46,8 @@ class Sesion:
     modos: Modos | None = None
     propiedades: PropiedadesModales | None = None
     espectrales: dict[str, RespuestaEspectral] = field(default_factory=dict)
+    revision: object | None = None  # RevisionSismica
+    mamposteria: object | None = None  # RevisionMamposteria
 
     def __post_init__(self) -> None:
         self.editor.observadores.append(self.limpiar_resultados)
@@ -85,6 +89,8 @@ class Sesion:
         self.modos = None
         self.propiedades = None
         self.espectrales = {}
+        self.revision = None
+        self.mamposteria = None
 
     # --- análisis -----------------------------------------------------------
     def analizar_estatico(self) -> Resultados:
@@ -97,6 +103,7 @@ class Sesion:
         self.modos = _motor(self.motor).modal(self.modelo, n_modos)
         self.propiedades = propiedades_modales(self.modelo, self.modos)
         self.espectrales = {}
+        self.revision = None
         return self.modos
 
     def analizar_espectral(self, direccion: str = "X", metodo: str = "CQC", n_modos: int = 12) -> RespuestaEspectral:
@@ -105,7 +112,31 @@ class Sesion:
             self.analizar_modal(n_modos)
         r = espectral(self.modelo, self.modos, direccion, metodo)
         self.espectrales[direccion] = r
+        self.revision = None
         return r
+
+    def revisar_mamposteria(self, n_modos: int = 12, criterios_sismo=None, criterios=None):
+        """Revisión de muros de mampostería (NTC Mampostería 2023). Corre lo que falte: estático,
+        y si hay masa y espectro, modal, espectral en X y Y y la revisión sísmica."""
+        from ..analisis.revision_sismica import revisar
+        from ..diseno.mamposteria import revisar_mamposteria
+
+        self._exigir_modelo()
+        m = self.modelo
+        motor = _motor(self.motor)
+        if self.estatico is None and m.patrones:
+            self.analizar_estatico()
+        if m.espectro is not None:
+            try:
+                for d in ("X", "Y"):
+                    if d not in self.espectrales:
+                        self.analizar_espectral(d, "CQC", n_modos)
+                if self.revision is None:
+                    self.revision = revisar(m, self.modos, self.espectrales, motor, criterios_sismo)
+            except ValueError:
+                self.revision = None  # sin masa: solo gravedad
+        self.mamposteria = revisar_mamposteria(m, self.estatico, self.revision, self.espectrales or None, motor, criterios)
+        return self.mamposteria
 
     # --- tablas para mostrar -------------------------------------------------
     def resumen(self) -> Tabla:
@@ -262,6 +293,56 @@ class Sesion:
             if a.id in r.fuerzas_muros:
                 x = r.fuerzas_muros[a.id]
                 t.filas.append([a.id, *(round(x[c], 2) for c in ("P", "V", "M", "Vfp", "Mfp"))])
+        return t
+
+    def tabla_mamposteria(self) -> Tabla:
+        r = self.mamposteria
+        if r is None:
+            raise ValueError("primero ejecuta la revisión de mampostería")
+        t = Tabla(
+            "Muros de mampostería, NTC Mampostería 2023 (kN, kN·m). " + (
+                "Cumplen todos." if r.cumple else "Hay muros o entrepisos que no cumplen."),
+            ["Muro", "Base (m)", "Dir.", "L (m)", "t (cm)", "Pu", "PR", "Vu", "VR", "Mu", "MR", "D/C", "Requisitos",
+             "Estado"],
+        )
+        for w in r.muros:
+            fallas = [c.concepto for c in w.comprobaciones if not c.resistencia and not c.cumple]
+            t.filas.append([
+                w.muro, round(w.z, 2), w.direccion, round(w.L, 2), round(w.t * 100, 1), round(w.Pu, 1), round(w.PR, 1),
+                "-" if w.Vu is None else round(w.Vu, 1), round(w.VR, 1) if w.Vu is not None else "-",
+                "-" if w.Mu is None else round(w.Mu, 1), "-" if w.MR is None else round(w.MR, 1),
+                round(w.relacion, 2), "cumplen" if not fallas else "; ".join(fallas),
+                "cumple" if w.cumple else "no cumple",
+            ])
+            t.estados.append("cumple" if w.cumple else "no cumple")
+        return t
+
+    def tabla_mamposteria_detalle(self) -> Tabla:
+        r = self.mamposteria
+        if r is None:
+            raise ValueError("primero ejecuta la revisión de mampostería")
+        t = Tabla("Revisiones por muro (valor contra límite o demanda contra resistencia); primero las que no cumplen",
+                  ["Muro", "Revisión", "Artículo", "Valor / demanda", "Límite / resistencia", "Unidad", "Estado", "Detalle"])
+        pares = [(w, c) for w in r.muros for c in w.comprobaciones]
+        for w, c in sorted(pares, key=lambda x: x[1].cumple):
+            t.filas.append([
+                w.muro, c.concepto, c.articulo, "-" if c.demanda is None else round(c.demanda, 3),
+                "-" if c.capacidad is None else round(c.capacidad, 3), c.unidad,
+                "cumple" if c.cumple else "no cumple", c.detalle,
+            ])
+            t.estados.append("cumple" if c.cumple else "no cumple")
+        return t
+
+    def tabla_mamposteria_entrepisos(self) -> Tabla:
+        r = self.mamposteria
+        if r is None:
+            raise ValueError("primero ejecuta la revisión de mampostería")
+        t = Tabla("Cortante resistente de entrepiso, VRi ≥ 0.8·Vui (NTC Mampostería 4.1.10)",
+                  ["Dirección", "Entrepiso (m)", "Muros", "ΣAT (m²)", "σ (kPa)", "VR (kN)", "0.8·Vu (kN)", "Estado"])
+        for e in r.entrepisos:
+            t.filas.append([e.direccion, f"{e.z_base:g}–{e.z_tope:g}", len(e.muros), round(e.AT, 3), round(e.sigma, 1),
+                            round(e.VR, 1), round(0.8 * e.Vu, 1), "cumple" if e.cumple else "no cumple"])
+            t.estados.append("cumple" if e.cumple else "no cumple")
         return t
 
     def _exigir_modelo(self) -> None:

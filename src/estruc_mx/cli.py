@@ -8,6 +8,7 @@
     estruc-mx espectral ejemplos/marco_3niveles.json --direccion X --metodo CQC
     estruc-mx gui ejemplos/marco_3niveles.json
     estruc-mx reporte ejemplos/marco_3niveles.json -o reporte.pdf --sistema marco_concreto_alta --ts 1.2
+    estruc-mx mamposteria ejemplos/casa_mamposteria.json
 """
 
 from __future__ import annotations
@@ -58,6 +59,12 @@ def main(argv: list[str] | None = None) -> int:
     es.add_argument("--modos", type=int, default=12)
     es.add_argument("--direccion", choices=["X", "Y"], default="X")
     es.add_argument("--metodo", choices=["CQC", "SRSS"], default="CQC")
+
+    ma = sub.add_parser("mamposteria", help="Revisa los muros de mampostería (NTC Mampostería 2023)")
+    ma.add_argument("modelo")
+    ma.add_argument("--motor", choices=["pynite", "opensees"], default="pynite")
+    ma.add_argument("--modos", type=int, default=12)
+    ma.add_argument("--detalle", action="store_true", help="Lista todas las revisiones, no solo las que no cumplen")
 
     g = sub.add_parser("gui", help="Abre la aplicación de escritorio")
     g.add_argument("modelo", nargs="?")
@@ -153,6 +160,29 @@ def main(argv: list[str] | None = None) -> int:
             print("  Nivel (m)   Deriva    Columna o muro")
             for d in r.derivas:
                 print(f"  {d.nivel:8.2f}  {d.deriva:8.5f}  {d.barra}")
+    elif args.orden == "mamposteria":
+        from .app.sesion import Sesion
+
+        ses = Sesion(motor=args.motor)
+        ses.editor.cargar(modelo)
+        r = ses.revisar_mamposteria(args.modos)
+        print(f"{modelo.nombre}: revisión de muros de mampostería, NTC Mampostería 2023, motor {args.motor}")
+        for t in (ses.tabla_mamposteria(), ses.tabla_mamposteria_entrepisos()):
+            print(f"\n{t.titulo}")
+            anchos = [max(len(str(x)) for x in [c, *(f[j] for f in t.filas)]) for j, c in enumerate(t.columnas)]
+            anchos = [min(a, 40) for a in anchos]
+            print("  " + "  ".join(f"{c:<{a}}" for c, a in zip(t.columnas, anchos)))
+            for f in t.filas:
+                print("  " + "  ".join(f"{str(x)[:a]:<{a}}" for x, a in zip(f, anchos)))
+        malas = [(w.muro, c) for w in r.muros for c in w.comprobaciones if args.detalle or not c.cumple]
+        if malas:
+            print("\nRevisiones" + ("" if args.detalle else " que no cumplen") + ":")
+            for muro, c in malas:
+                val = "" if c.demanda is None else f": {c.demanda:.3g} contra {c.capacidad:.3g} {c.unidad}"
+                print(f"  {muro:<6} {c.concepto} ({c.articulo}){val}. {c.detalle}")
+        for a in r.avisos:
+            print(f"Aviso: {a}")
+        return 0 if r.cumple else 1
     elif args.orden == "reporte":
         from .reporte import Opciones, generar
 

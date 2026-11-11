@@ -79,6 +79,7 @@ class DatosReporte:
     propiedades: PropiedadesModales | None = None
     espectral: dict[str, RespuestaEspectral] = field(default_factory=dict)  # "X", "Y"
     revision: RevisionSismica | None = None
+    mamposteria: object | None = None  # diseno.mamposteria.RevisionMamposteria
     masas: dict[str, float] = field(default_factory=dict)
     avisos: list[str] = field(default_factory=list)  # lo que no se pudo calcular
 
@@ -125,14 +126,21 @@ def preparar(modelo: Edificio, opciones: Opciones | None = None) -> DatosReporte
         d.avisos.append(f"No se calcularon las masas: {e}")
     if not d.masas:
         d.avisos.append("El modelo no tiene masa: no hay análisis modal ni espectral.")
-        return d
-
-    d.modos = motor.modal(modelo, op.n_modos)
-    d.propiedades = propiedades_modales(modelo, d.modos)
-    if modelo.espectro is None:
-        d.avisos.append("El modelo no tiene espectro: no hay análisis espectral.")
-        return d
-    for direccion in ("X", "Y"):
-        d.espectral[direccion] = espectral(modelo, d.modos, direccion, op.metodo)
-    d.revision = revisar(modelo, d.modos, d.espectral, motor, op.criterios())
+    else:
+        d.modos = motor.modal(modelo, op.n_modos)
+        d.propiedades = propiedades_modales(modelo, d.modos)
+        if modelo.espectro is None:
+            d.avisos.append("El modelo no tiene espectro: no hay análisis espectral.")
+        else:
+            for direccion in ("X", "Y"):
+                d.espectral[direccion] = espectral(modelo, d.modos, direccion, op.metodo)
+            d.revision = revisar(modelo, d.modos, d.espectral, motor, op.criterios())
+    _mamposteria(d, motor)
     return d
+
+
+def _mamposteria(d: DatosReporte, motor) -> None:
+    from ..diseno.mamposteria import muros_de_mamposteria, revisar_mamposteria
+
+    if muros_de_mamposteria(d.modelo):
+        d.mamposteria = revisar_mamposteria(d.modelo, d.estatico, d.revision, d.espectral or None, motor)

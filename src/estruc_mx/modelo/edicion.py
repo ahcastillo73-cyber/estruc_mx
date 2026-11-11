@@ -27,6 +27,8 @@ from .edificio import (
     Material,
     Nodo,
     PatronCarga,
+    PropiedadesMamposteria,
+    RefuerzoMuroMamposteria,
     Rejilla,
     SeccionArea,
     SeccionRectangular,
@@ -46,14 +48,17 @@ def modelo_inicial(nombre: str, rejilla: Rejilla | None = None) -> Edificio:
 
     Los valores son de arranque y se editan en Definir: concreto f'c = 250 kg/cm²
     (E ≈ 14 000·√f'c kg/cm² ≈ 22 GPa), combinaciones de gravedad 1.3CM + 1.5CV de las NTC.
-    Mampostería de tabique rojo recocido con f'm ≈ 15 kg/cm² y Em = 600·f'm ≈ 0.88 GPa
-    (NTC Mampostería, cargas de corta duración).
+    Mampostería de tabique rojo recocido con los valores indicativos de la NTC Mampostería 2023
+    para estructuras Tipo II (tablas 12.2.3): f'm = 1.5 MPa y v'm = 0.2 MPa; Em = 600·f'm = 0.9 GPa
+    (ec. 2.8.5.4.c, cargas de corta duración) y Gm = 0.2·Em (ec. 2.8.6.4.1). El muro de tabique
+    es confinado, con castillos de 15 × 15 cm y 4 #3.
     """
     return Edificio(
         nombre=nombre,
         materiales=[
             Material(nombre="Concreto f'c 250", tipo="concreto", E=22_000_000.0, nu=0.2, peso_vol=24.0),
-            Material(nombre="Tabique rojo", tipo="mamposteria", E=880_000.0, nu=0.25, peso_vol=15.0),
+            Material(nombre="Tabique rojo", tipo="mamposteria", E=900_000.0, nu=0.25, peso_vol=15.0,
+                     mamposteria=PropiedadesMamposteria(pieza="tabique_arcilla_artesanal", fm=1500.0, vm=200.0)),
         ],
         secciones=[
             SeccionRectangular(nombre="C40x40", material="Concreto f'c 250", b=0.40, h=0.40),
@@ -61,7 +66,8 @@ def modelo_inicial(nombre: str, rejilla: Rejilla | None = None) -> Edificio:
         ],
         secciones_area=[
             SeccionArea(nombre="Muro concreto 15", material="Concreto f'c 250", tipo="muro", espesor=0.15),
-            SeccionArea(nombre="Muro tabique 14", material="Tabique rojo", tipo="muro", espesor=0.14),
+            SeccionArea(nombre="Muro tabique 14", material="Tabique rojo", tipo="muro", espesor=0.14,
+                        mamposteria=RefuerzoMuroMamposteria()),
             SeccionArea(nombre="Losa 10", material="Concreto f'c 250", tipo="losa", espesor=0.10),
         ],
         # CM incluye el peso propio de barras, muros y losas; la masa lo cuenta una sola vez

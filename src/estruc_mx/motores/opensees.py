@@ -7,7 +7,8 @@ caída del motor no tumba la interfaz y OpenSees nunca se enlaza con el programa
 El script imprime los resultados en JSON, en ejes globales del modelo.
 
 Se analiza la malla de `modelo/malla.py`, la misma que usa PyNite: muros y losas como elementos
-ShellMITC4 con sección ElasticMembranePlateSection, y las barras que pasan por la malla, en tramos.
+ShellMITC4 con sección ElasticMembranePlateSection (o PlateFiber con material ortótropo cuando el
+módulo de cortante en el plano no es el isótropo, como en mampostería), y las barras que pasan por la malla, en tramos.
 Los diafragmas rígidos usan `rigidDiaphragm` con el nodo maestro en el centro de masa.
 """
 
@@ -30,6 +31,14 @@ _MARCA = "#RESULTADOS#"
 
 def _num(v: float) -> str:
     return repr(float(v))
+
+
+# Los materiales PlateFiber llevan tags aparte de los ortótropos que envuelven
+_DESFASE_MAT = 100000
+
+
+def _isotropo(E: float, nu: float, G: float) -> bool:
+    return abs(G - E / (2 * (1 + nu))) <= 1e-9 * E
 
 
 def generar_script(modelo: Edificio) -> str:
@@ -92,11 +101,24 @@ def generar_script(modelo: Edificio) -> str:
     if malla.elementos:
         w("    # Muros y losas: cáscara elástica (la masa va en los nodos, densidad 0)")
         for s in modelo.secciones_area:
-            m = modelo.material(s.material)
-            w(
-                f"    ops.section('ElasticMembranePlateSection', {tag_sec_area[s.nombre]}, "
-                f"{_num(m.E * s.mod_rigidez)}, {_num(m.nu)}, {_num(s.espesor)}, 0.0)  # {s.nombre}"
-            )
+            E, nu, Gp = modelo.modulos_area(s)
+            tag = tag_sec_area[s.nombre]
+            if _isotropo(E, nu, Gp):
+                w(
+                    f"    ops.section('ElasticMembranePlateSection', {tag}, "
+                    f"{_num(E)}, {_num(nu)}, {_num(s.espesor)}, 0.0)  # {s.nombre}"
+                )
+            else:
+                # Cortante en el plano distinto del isótropo (mampostería, Gm = 0.2·Em): material
+                # ortótropo integrado en el espesor; el cortante transversal queda isótropo
+                Ge = E / (2 * (1 + nu))
+                w(f"    # {s.nombre}: G en el plano = {Gp:.6g} kPa (isótropo daría {Ge:.6g})")
+                w(
+                    f"    ops.nDMaterial('ElasticOrthotropic', {tag}, {_num(E)}, {_num(E)}, {_num(E)}, "
+                    f"{_num(nu)}, {_num(nu)}, {_num(nu)}, {_num(Gp)}, {_num(Ge)}, {_num(Ge)}, 0.0)"
+                )
+                w(f"    ops.nDMaterial('PlateFiber', {tag + _DESFASE_MAT}, {tag})")
+                w(f"    ops.section('PlateFiber', {tag}, {tag + _DESFASE_MAT}, {_num(s.espesor)})")
         seccion = {a.id: a.seccion for a in modelo.areas}
         for e in malla.elementos:
             nodos = ", ".join(str(tag_nodo[n]) for n in e.nodos)

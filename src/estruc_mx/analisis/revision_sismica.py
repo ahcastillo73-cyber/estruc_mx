@@ -34,6 +34,7 @@ from ..motores import Modos
 from ..normas import cfe_sismo, ntc_sismo
 from .areas import COMPONENTES_MURO, todas_fuerzas_muros
 from .espectral import RespuestaEspectral, elementos_verticales, espectral
+from .pilas import todas_fuerzas_pilas
 from .pisos import Piso, pisos
 
 DIRECCIONES = ("X", "Y")
@@ -122,6 +123,10 @@ class RevisionSismica:
     derivas_elasticas: dict[str, list[DerivaNivel]] = field(default_factory=dict)
     # muro -> fuerzas sísmicas de diseño (escaladas, con torsión y 100/30), valores positivos
     fuerzas_muros: dict[str, dict[str, float]] = field(default_factory=dict)
+    # Igual, para cada muro junto con sus castillos (analisis/pilas.py); vacío si no hay castillos
+    fuerzas_pilas: dict[str, dict[str, float]] = field(default_factory=dict)
+    # dirección -> factor de cortante mínimo aplicado a las fuerzas de diseño
+    escala: dict[str, float] = field(default_factory=dict)
     avisos: list[str] = field(default_factory=list)
 
 
@@ -255,6 +260,7 @@ def revisar(modelo: Edificio, modos: Modos, respuestas: dict[str, RespuestaEspec
     elementos = respuestas["X"].derivas_elementos
     tors_derivas = {d: [{"X": 0.0, "Y": 0.0} for _ in elementos] for d in DIRECCIONES}
     tors_muros: dict[str, dict[str, dict[str, float]]] = {}
+    tors_pilas: dict[str, dict[str, dict[str, float]]] = {}
     if c.torsion and lista:
         rev.torsion = {d: _torsion_pisos(lista, respuestas[d], c) for d in DIRECCIONES}
         cargas = {f"TA{d}": cargas_torsion(modelo, lista, rev.torsion[d], masas, f"TA{d}") for d in DIRECCIONES}
@@ -265,7 +271,10 @@ def revisar(modelo: Edificio, modos: Modos, respuestas: dict[str, RespuestaEspec
                 if f"TA{d}" in res.desplazamientos:
                     tors_derivas[d] = _derivas_estaticas(modelo, res.desplazamientos[f"TA{d}"])
                     if any(a.tipo == "muro" for a in modelo.areas):
-                        tors_muros[d] = todas_fuerzas_muros(modelo, malla, res.fuerzas_elementos.get(f"TA{d}", {}))
+                        fe = res.fuerzas_elementos.get(f"TA{d}", {})
+                        tors_muros[d] = todas_fuerzas_muros(modelo, malla, fe)
+                        if any(r.fuerzas_pilas for r in respuestas.values()):
+                            tors_pilas[d] = todas_fuerzas_pilas(modelo, malla, fe, res.desplazamientos[f"TA{d}"])
             sin = [f"{p.z:g}" for p in lista if p.diafragma is None]
             if sin:
                 rev.avisos.append(f"Niveles sin diafragma rígido ({', '.join(sin)} m): la torsión accidental se "
@@ -310,15 +319,24 @@ def revisar(modelo: Edificio, modos: Modos, respuestas: dict[str, RespuestaEspec
                                     for k, v in elastica.items()}
 
     # --- fuerzas de diseño en muros ----------------------------------------------
+    rev.escala = escala
     if all(respuestas[d].fuerzas_muros for d in DIRECCIONES):
-        por_d = {}
-        for d in DIRECCIONES:
-            t = tors_muros.get(d, {})
-            por_d[d] = {a: {k: escala[d] * (v + abs(t.get(a, {}).get(k, 0.0))) for k, v in f.items()}
-                        for a, f in respuestas[d].fuerzas_muros.items()}
-        rev.fuerzas_muros = {
-            a: {k: float(max(por_d[d][a][k] + c.ortogonal * por_d[_OTRA[d]][a][k] for d in DIRECCIONES))
-                for k in COMPONENTES_MURO}
-            for a in por_d["X"]
-        }
+        rev.fuerzas_muros = _fuerzas_diseno({d: respuestas[d].fuerzas_muros for d in DIRECCIONES}, tors_muros, escala, c)
+    if all(respuestas[d].fuerzas_pilas for d in DIRECCIONES):
+        rev.fuerzas_pilas = _fuerzas_diseno({d: respuestas[d].fuerzas_pilas for d in DIRECCIONES}, tors_pilas, escala, c)
     return rev
+
+
+def _fuerzas_diseno(modales: dict[str, dict[str, dict[str, float]]], torsion: dict[str, dict[str, dict[str, float]]],
+                    escala: dict[str, float], c: CriteriosSismicos) -> dict[str, dict[str, float]]:
+    """Fuerzas sísmicas de diseño: escaladas, con torsión del signo desfavorable y 100/30."""
+    por_d = {}
+    for d in DIRECCIONES:
+        t = torsion.get(d, {})
+        por_d[d] = {a: {k: escala[d] * (v + abs(t.get(a, {}).get(k, 0.0))) for k, v in f.items()}
+                    for a, f in modales[d].items()}
+    return {
+        a: {k: float(max(por_d[d][a][k] + c.ortogonal * por_d[_OTRA[d]][a][k] for d in DIRECCIONES))
+            for k in COMPONENTES_MURO}
+        for a in por_d["X"]
+    }

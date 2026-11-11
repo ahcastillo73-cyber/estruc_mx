@@ -33,9 +33,14 @@ def casa_mamposteria():
         ((7.5, 0.0), (7.5, 3.5)), ((7.5, 3.5), (7.5, 6.5)),  # eje C
         ((4.0, 0.0), (4.0, 3.5)),  # eje B, entre 1 y 2
     ]
-    for z0, z1 in ((0.0, 2.6), (2.6, 5.2)):
+    # NTC Mampostería 3.1.1.2.1 a): hasta tres niveles, los muros del primero se analizan
+    # agrietados, con 0.5·Gm (3.1.1.2.3)
+    base = m.seccion_area("Muro tabique 14")
+    agrietado = base.model_copy(update={"nombre": "Muro tabique 14 agrietado", "mod_cortante": 0.5})
+    ed.reemplazar("secciones_area", [*ed.modelo.secciones_area, agrietado])
+    for (z0, z1), sec in (((0.0, 2.6), agrietado.nombre), ((2.6, 5.2), "Muro tabique 14")):
         for p, q in muros:
-            ed.agregar_muro(p, q, z0, z1, "Muro tabique 14")
+            ed.agregar_muro(p, q, z0, z1, sec)
     losas = [a.id for a in ed.modelo.areas if a.tipo == "losa"]
     ed.asignar_carga_area(losas, "CM", "Z", -2.5)  # acabados, instalaciones y muros divisorios
     ed.asignar_carga_area(losas, "CV", "Z", -1.9)  # habitación, carga viva máxima

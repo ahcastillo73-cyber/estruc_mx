@@ -10,7 +10,7 @@ from typing import Callable
 import numpy as np
 
 from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, Signal
-from PySide6.QtGui import QAction, QKeySequence
+from PySide6.QtGui import QAction, QColor, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -33,6 +33,9 @@ from .sesion import MOTORES, Sesion, Tabla
 
 _VISTA_MODELO = "Modelo sin deformar"
 _PREFIJO_CARGAS = "Cargas: "
+_VISTA_MAMPOSTERIA = "Mampostería: demanda/capacidad"
+_TABLAS_MAMPOSTERIA = ("Mampostería: muros", "Mampostería: revisiones", "Mampostería: entrepisos")
+_COLOR_ESTADO = {"cumple": "#d8f0d2", "no cumple": "#f6d0cc"}
 
 
 class _Senales(QObject):
@@ -134,6 +137,11 @@ class VentanaPrincipal(EdicionMixin, QMainWindow):
         self._acciones_analisis = [self.accion_estatico, self.accion_modal, self.accion_esp_x, self.accion_esp_y]
         for a in self._acciones_analisis:
             menu_analisis.addAction(a)
+
+        menu_diseno = self.menuBar().addMenu("D&iseño")
+        self.accion_mamposteria = QAction("Revisar muros de mampostería (NTC)", self, shortcut="F8",
+                                          triggered=self.ejecutar_mamposteria)
+        menu_diseno.addAction(self.accion_mamposteria)
 
         barra = QToolBar("Principal", self)
         self.addToolBar(barra)
@@ -247,7 +255,19 @@ class VentanaPrincipal(EdicionMixin, QMainWindow):
             f"Derivas {direccion}",
         )
 
-    def _lanzar(self, nombre: str, funcion: Callable[[], object], tabla_al_terminar: str) -> None:
+    def ejecutar_mamposteria(self) -> None:
+        n = int(self.n_modos.value())
+
+        def correr():
+            r = self.sesion.revisar_mamposteria(n)
+            for aviso in r.avisos:
+                self._avisos_pendientes.append(aviso)
+            return r
+
+        self._avisos_pendientes = []
+        self._lanzar("Revisión de mampostería", correr, _TABLAS_MAMPOSTERIA[0], vista=_VISTA_MAMPOSTERIA)
+
+    def _lanzar(self, nombre: str, funcion: Callable[[], object], tabla_al_terminar: str, vista: str | None = None) -> None:
         if self.sesion.modelo is None or self._ocupado:
             return
         self._ocupado = True
@@ -259,7 +279,12 @@ class VentanaPrincipal(EdicionMixin, QMainWindow):
             QApplication.restoreOverrideCursor()
             self._ocupado = False
             self.log(f"{nombre}: terminado")
+            for aviso in getattr(self, "_avisos_pendientes", []):
+                self.log(f"  Aviso: {aviso}")
+            self._avisos_pendientes = []
             self._actualizar_estado()
+            if vista:
+                self.selector_vista.setCurrentText(vista)
             self.selector_tabla.setCurrentText(tabla_al_terminar)
             self._mostrar_tabla_elegida(tabla_al_terminar)
             self.actualizar_vista()
@@ -300,6 +325,8 @@ class VentanaPrincipal(EdicionMixin, QMainWindow):
             nombres.append(f"Derivas {d}")
             if hay_muros:
                 nombres.append(f"Muros espectral {d}")
+        if s.mamposteria is not None:
+            nombres += list(_TABLAS_MAMPOSTERIA)
         return nombres
 
     def _combinacion_actual(self) -> str | None:
@@ -326,6 +353,11 @@ class VentanaPrincipal(EdicionMixin, QMainWindow):
             return s.tabla_derivas(nombre[-1])
         if nombre.startswith("Muros espectral ") and nombre[-1] in s.espectrales:
             return s.tabla_muros_espectral(nombre[-1])
+        if nombre in _TABLAS_MAMPOSTERIA and s.mamposteria is not None:
+            return {
+                _TABLAS_MAMPOSTERIA[0]: s.tabla_mamposteria, _TABLAS_MAMPOSTERIA[1]: s.tabla_mamposteria_detalle,
+                _TABLAS_MAMPOSTERIA[2]: s.tabla_mamposteria_entrepisos,
+            }[nombre]()
         return None
 
     def _mostrar_tabla_elegida(self, nombre: str) -> None:
@@ -341,10 +373,13 @@ class VentanaPrincipal(EdicionMixin, QMainWindow):
         self.tabla.setHorizontalHeaderLabels(t.columnas)
         self.tabla.setRowCount(len(t.filas))
         for i, fila in enumerate(t.filas):
+            color = _COLOR_ESTADO.get(t.estados[i]) if i < len(t.estados) else None
             for j, valor in enumerate(fila):
                 item = QTableWidgetItem(str(valor))
                 if isinstance(valor, (int, float)):
                     item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                if color:
+                    item.setBackground(QColor(color))
                 self.tabla.setItem(i, j, item)
         self.tabla.resizeColumnsToContents()
 
@@ -358,6 +393,8 @@ class VentanaPrincipal(EdicionMixin, QMainWindow):
             opciones += s.estatico.combinaciones
         if s.modos is not None:
             opciones += [f"Modo {i + 1} (T = {T:.3f} s)" for i, T in enumerate(s.modos.periodos)]
+        if s.mamposteria is not None:
+            opciones.append(_VISTA_MAMPOSTERIA)
         return opciones
 
     def tabla_de_vista(self, opcion: str) -> dict[str, list[float]] | None:
@@ -411,8 +448,25 @@ class VentanaPrincipal(EdicionMixin, QMainWindow):
                 pv.PolyData(np.array([n.coords for n in modelo.nodos])), color="black", point_size=7,
                 render_points_as_spheres=True, pickable=False,
             )
+        revisados = {}
+        if opcion == _VISTA_MAMPOSTERIA and self.sesion.mamposteria is not None:
+            revisados = {w.muro: w for w in self.sesion.mamposteria.muros}
+            sub = [a for a in modelo.areas if a.id in revisados]
+            if sub:
+                caras = malla_areas(modelo, sub)
+                caras.cell_data["D/C"] = [min(revisados[a.id].relacion, 2.0) if revisados[a.id].cumple
+                                          else max(revisados[a.id].relacion, 1.01) for a in sub]
+                self.plotter.add_mesh(
+                    caras, scalars="D/C", cmap="RdYlGn_r", clim=[0, 1.2], show_edges=True, edge_color="#555555", pickable=False,
+                    scalar_bar_args={"title": "D/C (rojo: no cumple)"},
+                )
+                c = np.array([modelo.esquinas(a).mean(axis=0) for a in sub])
+                etiquetas = [f"{a.id}\n{revisados[a.id].relacion:.2f}" + ("" if revisados[a.id].cumple else "\nno cumple")
+                             for a in sub]
+                self.plotter.add_point_labels(c, etiquetas, font_size=10, shape_opacity=0.3, show_points=False,
+                                              always_visible=True, pickable=False)
         for tipo, color in COLORES_AREA.items():
-            sub = [a for a in modelo.areas if a.tipo == tipo]
+            sub = [a for a in modelo.areas if a.tipo == tipo and a.id not in revisados]
             if sub:
                 self.plotter.add_mesh(
                     malla_areas(modelo, sub), color=color, opacity=0.12 if tabla else 0.45, show_edges=True,
@@ -574,6 +628,7 @@ class VentanaPrincipal(EdicionMixin, QMainWindow):
             a.setEnabled(hay)
         for a in self._acciones_analisis:
             a.setEnabled(hay and not self._ocupado)
+        self.accion_mamposteria.setEnabled(hay and not self._ocupado)
         hay_espectro = hay and self.sesion.modelo.espectro is not None
         self.accion_esp_x.setEnabled(hay_espectro and not self._ocupado)
         self.accion_esp_y.setEnabled(hay_espectro and not self._ocupado)
