@@ -5,6 +5,7 @@
     estruc-mx ver ejemplos/marco_3niveles.json --combinacion "1.1CM+SX"
     estruc-mx modal ejemplos/marco_3niveles.json --modos 12
     estruc-mx espectral ejemplos/marco_3niveles.json --direccion X --metodo CQC
+    estruc-mx gui ejemplos/marco_3niveles.json
 """
 
 from __future__ import annotations
@@ -56,7 +57,14 @@ def main(argv: list[str] | None = None) -> int:
     es.add_argument("--direccion", choices=["X", "Y"], default="X")
     es.add_argument("--metodo", choices=["CQC", "SRSS"], default="CQC")
 
+    g = sub.add_parser("gui", help="Abre la aplicación de escritorio")
+    g.add_argument("modelo", nargs="?")
+
     args = p.parse_args(argv)
+    if args.orden == "gui":
+        from .app.ventana import main as gui
+
+        return gui(["estruc-mx", *([args.modelo] if args.modelo else [])])
     modelo = Edificio.cargar(args.modelo)
 
     if args.orden == "analizar":
