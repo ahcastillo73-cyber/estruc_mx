@@ -6,6 +6,7 @@
     estruc-mx modal ejemplos/marco_3niveles.json --modos 12
     estruc-mx espectral ejemplos/marco_3niveles.json --direccion X --metodo CQC
     estruc-mx gui ejemplos/marco_3niveles.json
+    estruc-mx reporte ejemplos/marco_3niveles.json -o reporte.pdf --sistema marco_ductil_concreto
 """
 
 from __future__ import annotations
@@ -60,11 +61,33 @@ def main(argv: list[str] | None = None) -> int:
     g = sub.add_parser("gui", help="Abre la aplicación de escritorio")
     g.add_argument("modelo", nargs="?")
 
+    re = sub.add_parser("reporte", help="Reporte PDF o Word con modelo, cargas, modal, espectral y derivas")
+    re.add_argument("modelo", nargs="?")
+    re.add_argument("-o", "--salida", default="reporte.pdf", help="Archivo .pdf o .docx")
+    re.add_argument("--motor", choices=["pynite", "opensees"], default="pynite")
+    re.add_argument("--modos", type=int, default=12)
+    re.add_argument("--metodo", choices=["CQC", "SRSS"], default="CQC")
+    re.add_argument("--sistema", help="Sistema estructural para la distorsión límite NTC (ver --sistemas)")
+    re.add_argument("--deriva-limite", type=float, help="Distorsión límite explícita")
+    re.add_argument("--factor-deriva", type=float,
+                    help="Factor Q·R para comparar derivas; por defecto la reducción del espectro")
+    re.add_argument("--secciones", help="Lista separada por comas; por defecto todas")
+    re.add_argument("--autor", default="")
+    re.add_argument("--sistemas", action="store_true", help="Lista los sistemas estructurales y sale")
+
     args = p.parse_args(argv)
     if args.orden == "gui":
         from .app.ventana import main as gui
 
         return gui(["estruc-mx", *([args.modelo] if args.modelo else [])])
+    if args.orden == "reporte" and args.sistemas:
+        from .normas.ntc_sismo import DISTORSIONES_LIMITE
+
+        for clave, (desc, valor) in DISTORSIONES_LIMITE.items():
+            print(f"  {clave:<34} {valor:<7g} {desc}")
+        return 0
+    if args.modelo is None:
+        p.error("falta el archivo del modelo")
     modelo = Edificio.cargar(args.modelo)
 
     if args.orden == "analizar":
@@ -110,6 +133,16 @@ def main(argv: list[str] | None = None) -> int:
             print("  Nivel (m)   Deriva    Columna")
             for d in r.derivas:
                 print(f"  {d.nivel:8.2f}  {d.deriva:8.5f}  {d.barra}")
+    elif args.orden == "reporte":
+        from .reporte import Opciones, generar
+
+        op = Opciones(
+            motor=args.motor, n_modos=args.modos, metodo=args.metodo, sistema=args.sistema,
+            deriva_limite=args.deriva_limite, factor_deriva=args.factor_deriva, autor=args.autor,
+        )
+        secciones = [x.strip() for x in args.secciones.split(",")] if args.secciones else None
+        ruta = generar(modelo, args.salida, op, secciones)
+        print(f"Reporte guardado en {ruta}")
     return 0
 
 
