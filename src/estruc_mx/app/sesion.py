@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from ..analisis.espectral import PropiedadesModales, RespuestaEspectral, espectral, propiedades_modales
-from ..modelo import Edificio, masas_nodales
+from ..modelo import Edificio, Editor, Rejilla, masas_nodales
 from ..motores import Modos, Resultados
 
 MOTORES = ("pynite", "opensees")
@@ -35,7 +35,9 @@ class Tabla:
 
 @dataclass
 class Sesion:
-    modelo: Edificio | None = None
+    """El modelo vive en `editor` (con su historia); cualquier cambio descarta los resultados."""
+
+    editor: Editor = field(default_factory=Editor)
     ruta: str | None = None
     motor: str = "pynite"
     estatico: Resultados | None = None
@@ -43,11 +45,25 @@ class Sesion:
     propiedades: PropiedadesModales | None = None
     espectrales: dict[str, RespuestaEspectral] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        self.editor.observadores.append(self.limpiar_resultados)
+
+    @property
+    def modelo(self) -> Edificio | None:
+        return self.editor.modelo
+
+    @property
+    def modificado(self) -> bool:
+        return self.editor.modificado
+
     # --- archivo ----------------------------------------------------------
+    def nuevo(self, nombre: str, rejilla: Rejilla | None = None) -> None:
+        self.editor.nuevo(nombre, rejilla)
+        self.ruta = None
+
     def abrir(self, ruta: str) -> None:
-        self.modelo = Edificio.cargar(ruta)
+        self.editor.cargar(Edificio.cargar(ruta))
         self.ruta = ruta
-        self.limpiar_resultados()
 
     def guardar(self, ruta: str | None = None) -> None:
         self._exigir_modelo()
@@ -55,6 +71,7 @@ class Sesion:
         if not self.ruta:
             raise ValueError("falta la ruta del archivo")
         self.modelo.guardar(self.ruta)
+        self.editor.modificado = False
 
     def exportar_script(self, ruta: str) -> None:
         from ..motores import opensees

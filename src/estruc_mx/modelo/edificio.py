@@ -133,6 +133,75 @@ class Combinacion(BaseModel):
     factores: dict[str, float]
 
 
+class EjeRejilla(BaseModel):
+    nombre: str
+    coord: float = Field(description="Coordenada del eje, m")
+
+
+class Nivel(BaseModel):
+    nombre: str
+    z: float = Field(description="Elevación, m")
+
+
+class Rejilla(BaseModel):
+    """Ejes y niveles de referencia para dibujar (como la rejilla de ETABS).
+
+    Los ejes X son rectas paralelas a Y en x = coord; los ejes Y son paralelas a X en y = coord.
+    No entra en el análisis: solo ayuda a crear nodos y barras en lugares conocidos.
+    """
+
+    ejes_x: list[EjeRejilla] = []
+    ejes_y: list[EjeRejilla] = []
+    niveles: list[Nivel] = []
+
+    @model_validator(mode="after")
+    def _ordenar(self) -> "Rejilla":
+        self.ejes_x.sort(key=lambda e: e.coord)
+        self.ejes_y.sort(key=lambda e: e.coord)
+        self.niveles.sort(key=lambda n: n.z)
+        for que, items in (("ejes X", self.ejes_x), ("ejes Y", self.ejes_y), ("niveles", self.niveles)):
+            nombres = [i.nombre for i in items]
+            if len(set(nombres)) != len(nombres):
+                raise ValueError(f"rejilla: nombres de {que} repetidos")
+        return self
+
+    @classmethod
+    def regular(cls, claros_x: list[float], claros_y: list[float], alturas: list[float]) -> "Rejilla":
+        """Rejilla a partir de claros y alturas de entrepiso. Ejes X: A, B, C…; ejes Y: 1, 2, 3…;
+        niveles: Base, N1, N2…"""
+
+        def acumular(claros: list[float]) -> list[float]:
+            c = [0.0]
+            for d in claros:
+                c.append(c[-1] + d)
+            return c
+
+        return cls(
+            ejes_x=[EjeRejilla(nombre=_letra(k), coord=x) for k, x in enumerate(acumular(claros_x))],
+            ejes_y=[EjeRejilla(nombre=str(k + 1), coord=y) for k, y in enumerate(acumular(claros_y))],
+            niveles=[Nivel(nombre="Base" if k == 0 else f"N{k}", z=z) for k, z in enumerate(acumular(alturas))],
+        )
+
+    def intersecciones(self) -> list[tuple[str, tuple[float, float, float]]]:
+        """Puntos (nombre, (x, y, z)) en cada cruce de ejes y nivel, p. ej. ("B2-N1", (6, 5, 3.5))."""
+        return [
+            (f"{ex.nombre}{ey.nombre}-{nv.nombre}", (ex.coord, ey.coord, nv.z))
+            for nv in self.niveles
+            for ey in self.ejes_y
+            for ex in self.ejes_x
+        ]
+
+
+def _letra(k: int) -> str:
+    """0 -> A, 25 -> Z, 26 -> AA…"""
+    s = ""
+    k += 1
+    while k:
+        k, r = divmod(k - 1, 26)
+        s = chr(65 + r) + s
+    return s
+
+
 class Edificio(BaseModel):
     nombre: str
     materiales: list[Material] = []
@@ -149,6 +218,8 @@ class Edificio(BaseModel):
     peso_propio_en_masa: bool = True
     masas_nodales: list[MasaNodal] = []
     espectro: Espectro | None = None
+    # Solo para dibujar en la ventana; no entra en el análisis
+    rejilla: Rejilla | None = None
 
     # --- búsquedas ---------------------------------------------------------
     def material(self, nombre: str) -> Material:

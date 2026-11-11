@@ -1,10 +1,13 @@
-"""Ventana principal: modelo 3D en el centro, tablas a la derecha y registro abajo."""
+"""Ventana principal: modelo 3D en el centro, explorador y propiedades a la izquierda,
+tablas de resultados a la derecha y registro abajo."""
 
 from __future__ import annotations
 
 import sys
 import traceback
 from typing import Callable
+
+import numpy as np
 
 from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, Signal
 from PySide6.QtGui import QAction, QKeySequence
@@ -25,6 +28,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .edicion import EdicionMixin
 from .sesion import MOTORES, Sesion, Tabla
 
 _VISTA_MODELO = "Modelo sin deformar"
@@ -50,7 +54,7 @@ class _Tarea(QRunnable):
             self.senales.error.emit(f"{e}\n\n{traceback.format_exc(limit=3)}")
 
 
-class VentanaPrincipal(QMainWindow):
+class VentanaPrincipal(EdicionMixin, QMainWindow):
     def __init__(self, vista_3d: bool = True, sincrono: bool = False):
         super().__init__()
         self.sesion = Sesion()
@@ -61,8 +65,9 @@ class VentanaPrincipal(QMainWindow):
 
         self._crear_vista(vista_3d)
         self._crear_paneles()
+        self._crear_edicion()
         self._crear_acciones()
-        self._actualizar_estado()
+        self._modelo_cambiado()
 
     # --- construcción ---------------------------------------------------------
     def _crear_vista(self, vista_3d: bool) -> None:
@@ -73,6 +78,10 @@ class VentanaPrincipal(QMainWindow):
             self.plotter = QtInteractor(self)
             self.plotter.set_background("white")
             self.setCentralWidget(self.plotter.interactor)
+            # Un clic sin arrastrar selecciona o dibuja; arrastrar sigue girando la cámara.
+            self._pos_presion = None
+            self.plotter.iren.add_observer("LeftButtonPressEvent", self._al_presionar)
+            self.plotter.iren.add_observer("LeftButtonReleaseEvent", self._al_soltar)
         else:
             self.setCentralWidget(QLabel("Vista 3D desactivada"))
 
@@ -104,6 +113,8 @@ class VentanaPrincipal(QMainWindow):
 
     def _crear_acciones(self) -> None:
         menu_archivo = self.menuBar().addMenu("&Archivo")
+        self.accion_nuevo = QAction("Nuevo…", self, shortcut=QKeySequence.New, triggered=self._dialogo_nuevo)
+        menu_archivo.addAction(self.accion_nuevo)
         self.accion_abrir = QAction("Abrir modelo…", self, shortcut=QKeySequence.Open, triggered=self._dialogo_abrir)
         self.accion_guardar = QAction("Guardar", self, shortcut=QKeySequence.Save, triggered=self._guardar)
         self.accion_guardar_como = QAction("Guardar como…", self, triggered=self._dialogo_guardar_como)
@@ -125,6 +136,7 @@ class VentanaPrincipal(QMainWindow):
 
         barra = QToolBar("Principal", self)
         self.addToolBar(barra)
+        barra.addAction(self.accion_nuevo)
         barra.addAction(self.accion_abrir)
         barra.addAction(self.accion_guardar)
         barra.addSeparator()
@@ -150,6 +162,8 @@ class VentanaPrincipal(QMainWindow):
         self.factor_escala.valueChanged.connect(lambda _: self.actualizar_vista())
         barra.addWidget(self.factor_escala)
 
+        self._crear_acciones_edicion()
+
     # --- archivo ----------------------------------------------------------------
     def abrir(self, ruta: str) -> None:
         try:
@@ -161,7 +175,28 @@ class VentanaPrincipal(QMainWindow):
         self._actualizar_estado()
         self.actualizar_vista(reiniciar_camara=True)
 
+    def _confirmar_descartar(self) -> bool:
+        """True si se puede seguir sin guardar (no hay cambios o el usuario lo decide)."""
+        if self.sincrono or self.sesion.modelo is None or not self.sesion.modificado:
+            return True
+        r = QMessageBox.question(
+            self, "estruc_mx", "El modelo tiene cambios sin guardar. ¿Guardarlos?",
+            QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel,
+        )
+        if r == QMessageBox.Save:
+            self._guardar()
+            return not self.sesion.modificado
+        return r == QMessageBox.Discard
+
+    def closeEvent(self, evento) -> None:  # noqa: N802 - nombre de Qt
+        if self._confirmar_descartar():
+            evento.accept()
+        else:
+            evento.ignore()
+
     def _dialogo_abrir(self) -> None:
+        if not self._confirmar_descartar():
+            return
         ruta, _ = QFileDialog.getOpenFileName(self, "Abrir modelo", "", "Modelos (*.json)")
         if ruta:
             self.abrir(ruta)
@@ -171,10 +206,13 @@ class VentanaPrincipal(QMainWindow):
             return self._dialogo_guardar_como()
         self.sesion.guardar()
         self.log(f"Guardado {self.sesion.ruta}")
+        self._actualizar_estado()
 
     def _dialogo_guardar_como(self) -> None:
         ruta, _ = QFileDialog.getSaveFileName(self, "Guardar modelo", "", "Modelos (*.json)")
         if ruta:
+            if not ruta.lower().endswith(".json"):
+                ruta += ".json"
             self.sesion.guardar(ruta)
             self.log(f"Guardado {ruta}")
             self._actualizar_estado()
@@ -316,33 +354,131 @@ class VentanaPrincipal(QMainWindow):
         return None
 
     def actualizar_vista(self, reiniciar_camara: bool = False) -> None:
-        if self.plotter is None or self.sesion.modelo is None:
+        if self.plotter is None:
             return
-        from ..visual.vista3d import escala_para_tabla, malla_desde_tabla
+        if self.sesion.modelo is None:
+            self.plotter.clear()
+            self.plotter.render()
+            return
+        import pyvista as pv
+
+        from ..visual.vista3d import escala_para_tabla, malla_desde_tabla, malla_rejilla
 
         modelo = self.sesion.modelo
         opcion = self.selector_vista.currentText() or _VISTA_MODELO
         tabla = self.tabla_de_vista(opcion)
-        camara = None if reiniciar_camara else self.plotter.camera_position
+        camara = None if reiniciar_camara or not self.plotter.renderer.actors else self.plotter.camera_position
         self.plotter.clear()
-        self.plotter.add_mesh(malla_desde_tabla(modelo, None), color="gray", line_width=2, opacity=0.35 if tabla else 1.0)
-        if tabla is not None:
+        if modelo.rejilla is not None:
+            lineas, etiquetas = malla_rejilla(modelo.rejilla)
+            if lineas is not None:
+                self.plotter.add_mesh(lineas, color="#9bb7d4", line_width=1, pickable=False)
+                self.plotter.add_point_labels(
+                    etiquetas, etiquetas["nombre"], font_size=11, text_color="#3a6ea5", shape_opacity=0.0,
+                    show_points=False, always_visible=True, pickable=False,
+                )
+            if self.modo != "seleccionar":
+                pts = np.array([p for _, p in modelo.rejilla.intersecciones()], dtype=float)
+                if len(pts):
+                    self.plotter.add_mesh(pv.PolyData(pts), color="#5d8fc9", point_size=8, render_points_as_spheres=True, pickable=False)
+        if modelo.barras:
+            for tipo, color in (("columna", "#1f5fa8"), ("viga", "#2f7d32"), ("contraviento", "#8e44ad"), ("barra", "#555555")):
+                sub = [b for b in modelo.barras if b.tipo == tipo]
+                if sub:
+                    self.plotter.add_mesh(
+                        _malla_lineas(modelo, sub), color=color, line_width=3, opacity=0.35 if tabla else 1.0, pickable=False
+                    )
+        if modelo.nodos:
+            self.plotter.add_mesh(
+                pv.PolyData(np.array([n.coords for n in modelo.nodos])), color="black", point_size=7,
+                render_points_as_spheres=True, pickable=False,
+            )
+        apoyados = {a.nodo for a in modelo.apoyos}
+        if apoyados:
+            pts = np.array([n.coords for n in modelo.nodos if n.id in apoyados])
+            self.plotter.add_mesh(pv.PolyData(pts), color="#e67e22", point_size=14, render_points_as_spheres=False, pickable=False)
+        if tabla is not None and modelo.barras:
             escala = escala_para_tabla(modelo, tabla) * self.factor_escala.value()
             self.plotter.add_mesh(
                 malla_desde_tabla(modelo, tabla, escala), scalars="desplazamiento", line_width=4, cmap="viridis",
                 scalar_bar_args={"title": "Desplazamiento" + (" (m)" if not opcion.startswith("Modo") else " (relativo)")},
             )
-        self.plotter.add_text(f"{modelo.nombre} - {opcion}", font_size=9, color="black")
+        self.plotter.add_text(f"{modelo.nombre} - {opcion}", font_size=9, color="black", name="titulo")
         self.plotter.show_axes()
+        self._dibujar_seleccion(render=False)
         if camara is None:
             self.plotter.view_isometric()
         else:
             self.plotter.camera_position = camara
         self.plotter.render()
 
+    def _dibujar_seleccion(self, render: bool = True) -> None:
+        """Resalta lo seleccionado (y el primer extremo de una barra en dibujo) sin redibujar todo."""
+        if self.plotter is None:
+            return
+        import pyvista as pv
+
+        for nombre in ("sel_barras", "sel_nodos", "primer_punto"):
+            self.plotter.remove_actor(nombre, render=False)
+        m = self.sesion.modelo
+        # Sobre una deformada el resaltado estorba: solo se dibuja en el modelo sin deformar
+        if m is not None and self.tabla_de_vista(self.selector_vista.currentText()) is None:
+            barras = [b for b in m.barras if b.id in self.sel_barras]
+            if barras:
+                self.plotter.add_mesh(_malla_lineas(m, barras), color="red", line_width=6, name="sel_barras", pickable=False)
+            nodos = [n.coords for n in m.nodos if n.id in self.sel_nodos]
+            if nodos:
+                self.plotter.add_mesh(pv.PolyData(np.array(nodos)), color="red", point_size=13, render_points_as_spheres=True, name="sel_nodos", pickable=False)
+            if self.primer_punto is not None:
+                p = np.array([self._coords(self.primer_punto)])
+                self.plotter.add_mesh(pv.PolyData(p), color="#f39c12", point_size=16, render_points_as_spheres=True, name="primer_punto", pickable=False)
+        if render:
+            self.plotter.render()
+
+    # --- ratón en la vista 3D ---------------------------------------------------
+    def _al_presionar(self, *_args) -> None:
+        self._pos_presion = self.plotter.iren.get_event_position()
+
+    def _al_soltar(self, *_args) -> None:
+        if self._pos_presion is None:
+            return
+        x, y = self.plotter.iren.get_event_position()
+        x0, y0 = self._pos_presion
+        self._pos_presion = None
+        if abs(x - x0) > 3 or abs(y - y0) > 3:
+            return  # fue un arrastre para girar la vista
+        i = self.plotter.iren.interactor
+        self.clic(self.objetivo_en_pantalla(x, y), aditivo=bool(i.GetShiftKey() or i.GetControlKey()))
+
+    def objetivo_en_pantalla(self, x: float, y: float):
+        """Qué hay bajo el punto (x, y) de la pantalla, en el formato de `clic`."""
+        from ..visual.seleccion import elegir, matriz_camara
+
+        m = self.sesion.modelo
+        if m is None or self.plotter is None:
+            return None
+        ren = self.plotter.renderer
+        ancho, alto = ren.GetSize()
+        nodos = np.array([n.coords for n in m.nodos]).reshape(-1, 3)
+        indice = {n.id: n.coords for n in m.nodos}
+        barras = np.array([[indice[b.i], indice[b.j]] for b in m.barras]).reshape(-1, 2, 3)
+        puntos = []
+        if self.modo != "seleccionar" and m.rejilla is not None:
+            puntos = [p for _, p in m.rejilla.intersecciones()]
+        r = elegir((x, y), nodos, barras, np.array(puntos, dtype=float).reshape(-1, 3), matriz_camara(ren), ancho, alto)
+        if r is None:
+            return None
+        que, k = r
+        if que == "nodo":
+            return "nodo", m.nodos[k].id
+        if que == "barra":
+            return "barra", m.barras[k].id
+        return "punto", tuple(puntos[k])
+
     # --- estado -----------------------------------------------------------------
     def _actualizar_estado(self) -> None:
         hay = self.sesion.modelo is not None
+        self._actualizar_estado_edicion()
         for a in (self.accion_guardar, self.accion_guardar_como, self.accion_script):
             a.setEnabled(hay)
         for a in self._acciones_analisis:
@@ -361,8 +497,8 @@ class VentanaPrincipal(QMainWindow):
             selector.blockSignals(False)
         self._mostrar_tabla_elegida(self.selector_tabla.currentText())
         titulo = "estruc_mx"
-        if self.sesion.ruta:
-            titulo += f" - {self.sesion.ruta}"
+        if hay:
+            titulo += f" - {self.sesion.ruta or 'sin guardar'}" + (" *" if self.sesion.modificado else "")
         self.setWindowTitle(titulo)
 
     def log(self, texto: str) -> None:
@@ -372,6 +508,15 @@ class VentanaPrincipal(QMainWindow):
         self.log(texto.splitlines()[0])
         if not self.sincrono:
             QMessageBox.critical(self, "estruc_mx", texto)
+
+
+def _malla_lineas(modelo, barras):
+    import pyvista as pv
+
+    indice = {n.id: n.coords for n in modelo.nodos}
+    puntos = np.array([p for b in barras for p in (indice[b.i], indice[b.j])], dtype=float)
+    lineas = np.array([[2, 2 * k, 2 * k + 1] for k in range(len(barras))], dtype=np.int64).ravel()
+    return pv.PolyData(puntos, lines=lineas)
 
 
 def main(argv: list[str] | None = None) -> int:

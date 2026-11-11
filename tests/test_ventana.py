@@ -63,3 +63,70 @@ def test_error_al_abrir_se_registra(ventana, tmp_path):
     ventana.abrir(str(malo))
     assert "No se pudo abrir" in ventana.registro.toPlainText()
     assert ventana.sesion.modelo is None
+
+
+def test_crear_marco_desde_cero_calcular_y_guardar(ventana, tmp_path):
+    ventana.nuevo_modelo("Nuevo", [6.0, 6.0], [5.0], [3.5, 3.0])
+    m = ventana.sesion.modelo
+    assert len(m.barras) == 26 and ventana.arbol.topLevelItem(1).text(0) == "Barras (26)"
+    assert ventana.accion_deshacer.text() == "Deshacer marco desde rejilla"
+
+    # Cargas de gravedad en todas las vigas y análisis
+    vigas = [b.id for b in m.barras if b.tipo == "viga"]
+    ventana.seleccionar(barras=vigas)
+    ventana.hacer_carga_distribuida("CM", "Z", -15.0)
+    ventana.ejecutar_estatico()
+    assert ventana.selector_tabla.currentText() == "Desplazamientos"
+    assert "1.3CM+1.5CV" in items(ventana.selector_vista)
+
+    # Dibujar una barra con dos clics descarta los resultados
+    ventana.fijar_modo("barra")
+    ventana.clic(("punto", (0.0, 0.0, 3.5)))
+    ventana.clic(("nodo", "C2-N2"))
+    assert ventana.sesion.modelo.barra("D1").tipo == "contraviento"
+    assert ventana.sesion.estatico is None and items(ventana.selector_tabla) == ["Modelo"]
+    ventana.deshacer()
+    assert "D1" not in {b.id for b in ventana.sesion.modelo.barras}
+
+    # Selección y panel de propiedades
+    ventana.fijar_modo("seleccionar")
+    ventana.clic(("barra", "C1"))
+    assert ventana.sel_barras == {"C1"} and "seccion" in ventana.controles_propiedades
+    ventana.aplicar_propiedad("seccion", "V25x50")
+    ventana.aplicar_propiedad("id", "C-A1")
+    assert ventana.sesion.modelo.barra("C-A1").seccion == "V25x50" and ventana.sel_barras == {"C-A1"}
+    ventana.clic(("nodo", "A1-Base"))
+    ventana.aplicar_propiedad("apoyo", "Articulado")
+    apoyos = {a.nodo: a.restricciones for a in ventana.sesion.modelo.apoyos}
+    assert apoyos["A1-Base"] == (True, True, True, False, False, False)
+    ventana.clic(None)
+    assert not ventana.sel_nodos and not ventana.sel_barras
+
+    # Definir: renombrar un patrón se propaga a cargas y combinaciones
+    ventana.hacer_definir("patrones", [["Muerta", "muerta"], ["CV", "viva"]], {"CM": "Muerta"})
+    assert ventana.sesion.modelo.cargas_distribuidas[0].patron == "Muerta"
+
+    # Borrar con la selección
+    ventana.seleccionar(nodos=["C1-N2"])
+    ventana.borrar_seleccion()
+    assert "C1-N2" not in {n.id for n in ventana.sesion.modelo.nodos}
+
+    # Guardar y reabrir
+    ruta = tmp_path / "nuevo.json"
+    ventana.sesion.guardar(str(ruta))
+    assert not ventana.sesion.modificado
+    ventana.abrir(str(ruta))
+    assert len(ventana.sesion.modelo.barras) == 23 and ventana.sesion.modelo.rejilla is not None
+    ventana.ejecutar_estatico()
+    assert ventana.sesion.estatico is not None
+
+
+def test_errores_de_edicion_se_registran_sin_cambiar_el_modelo(ventana):
+    ventana.nuevo_modelo("Nuevo", [6.0], [5.0], [3.0])
+    antes = ventana.sesion.modelo
+    ventana.seleccionar(barras=["C1"])
+    ventana.aplicar_propiedad("rotacion", "abc")
+    assert "No se pudo cambiar" in ventana.registro.toPlainText()
+    ventana.fijar_modo("columna")
+    ventana.clic(("punto", (0.0, 0.0, 0.0)))  # no hay nivel abajo de la base
+    assert ventana.sesion.modelo is antes

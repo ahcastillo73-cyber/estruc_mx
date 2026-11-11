@@ -35,6 +35,30 @@ def malla_desde_tabla(modelo: Edificio, tabla: dict[str, list[float]] | None, es
     return malla
 
 
+def malla_rejilla(rejilla, margen: float = 1.0):
+    """Líneas de la rejilla en cada nivel y puntos con los nombres de los ejes (en el nivel
+    más bajo, un poco afuera del edificio). Devuelve (líneas, etiquetas) o (None, None)."""
+    import pyvista as pv
+
+    if not rejilla.ejes_x or not rejilla.ejes_y or not rejilla.niveles:
+        return None, None
+    x0, x1 = rejilla.ejes_x[0].coord - margen, rejilla.ejes_x[-1].coord + margen
+    y0, y1 = rejilla.ejes_y[0].coord - margen, rejilla.ejes_y[-1].coord + margen
+    puntos = []
+    for nv in rejilla.niveles:
+        for e in rejilla.ejes_x:
+            puntos += [(e.coord, y0, nv.z), (e.coord, y1, nv.z)]
+        for e in rejilla.ejes_y:
+            puntos += [(x0, e.coord, nv.z), (x1, e.coord, nv.z)]
+    n = len(puntos) // 2
+    lineas = pv.PolyData(np.array(puntos, dtype=float), lines=np.array([[2, 2 * k, 2 * k + 1] for k in range(n)], dtype=np.int64).ravel())
+    z = rejilla.niveles[0].z
+    pos = [(e.coord, y0 - 0.3 * margen, z) for e in rejilla.ejes_x] + [(x0 - 0.3 * margen, e.coord, z) for e in rejilla.ejes_y]
+    etiquetas = pv.PolyData(np.array(pos, dtype=float))
+    etiquetas["nombre"] = [e.nombre for e in rejilla.ejes_x] + [e.nombre for e in rejilla.ejes_y]
+    return lineas, etiquetas
+
+
 def escala_automatica(modelo: Edificio, resultados: Resultados, combinacion: str) -> float:
     """Escala para que el máximo desplazamiento se vea como el 5 % del tamaño del edificio."""
     return escala_para_tabla(modelo, resultados.desplazamientos[combinacion])
