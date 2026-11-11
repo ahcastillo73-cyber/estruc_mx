@@ -6,6 +6,11 @@ así que los ejes locales de las barras quedan iguales a los de `Edificio.ejes_l
 
 Se analiza la malla de `modelo/malla.py`: los muros y losas son cuadriláteros `Quad3D` de PyNite
 (membrana isoparamétrica más placa DKMQ) y las barras que pasan por la malla, tramos.
+
+PyNite no tiene restricciones de diafragma rígido. Se imitan con barras «araña» muy rígidas de un
+nodo del piso a todos los demás: rígidas axialmente y a flexión en el plano del piso, sin
+rigidez fuera del plano ni a torsión para que no toquen la flexión de la losa. El resultado
+coincide con el `rigidDiaphragm` exacto de OpenSees (ver pruebas).
 """
 
 from __future__ import annotations
@@ -63,6 +68,8 @@ def construir(modelo: Edificio, malla: Malla | None = None) -> FEModel3D:
         sec = seccion[e.area]
         fem.add_quad(e.id, *e.nodos, espesor[sec], _material_area(sec))
 
+    _diafragmas(fem, modelo, malla)
+
     for c in modelo.cargas_nodales:
         fx, fy, fz, mx, my, mz = c.fuerzas
         F = _a_pynite((fx, fy, fz))
@@ -92,6 +99,50 @@ def construir(modelo: Edificio, malla: Malla | None = None) -> FEModel3D:
     for co in combinaciones_efectivas(modelo):
         fem.add_load_combo(co.nombre, dict(co.factores))
     return fem
+
+
+# Rigidez axial de las barras del diafragma: este factor por el mayor E del modelo, por m² y por m
+RIGIDEZ_DIAFRAGMA = 1e4
+# Inercia fuera del plano y torsión de esas barras, relativa a la del plano: prácticamente nula
+_FUERA_DEL_PLANO = 1e-14
+_MAT_DIAFRAGMA = "__diafragma__"
+
+
+def _centro_de_diafragma(malla: Malla, d) -> str:
+    """Nodo del piso más cercano al centro de masa: de él salen las barras del diafragma."""
+    return min(d.esclavos, key=lambda n: float(np.linalg.norm(malla.nodos[n][:2] - d.centro[:2])))
+
+
+def _diafragmas(fem: FEModel3D, modelo: Edificio, malla: Malla) -> None:
+    """Barras rígidas en el plano del piso, del nodo más cercano al centro de masa a los demás.
+
+    No se agrega un nodo maestro: PyNite parte las barras en cualquier nodo que caiga sobre
+    ellas, y el centro de masa suele quedar sobre una viga. El movimiento del centro de masa se
+    calcula después como cuerpo rígido (ver `_agregar_maestros`)."""
+    if not malla.diafragmas:
+        return
+    E = RIGIDEZ_DIAFRAGMA * max(m.E for m in modelo.materiales)
+    fem.add_material(_MAT_DIAFRAGMA, E, E / 2.4, 0.2, 0.0)
+    for d in malla.diafragmas:
+        a = _centro_de_diafragma(malla, d)
+        for b in d.esclavos:
+            if b == a:
+                continue
+            L = float(np.linalg.norm(malla.nodos[b][:2] - malla.nodos[a][:2]))
+            nombre = f"{d.maestro}>{b}"
+            # Iy (flexión en el plano del piso) tal que 12EI/L³ = EA/L; Iz y J casi nulos
+            Iy = L**2 / 12.0
+            fem.add_section(nombre, 1.0, Iy, Iy * _FUERA_DEL_PLANO, Iy * _FUERA_DEL_PLANO)
+            fem.add_member(nombre, a, b, _MAT_DIAFRAGMA, nombre)
+
+
+def _agregar_maestros(tabla: dict[str, list[float]], malla: Malla) -> None:
+    """Agrega a la tabla el movimiento (UX, UY, RZ) del centro de masa de cada diafragma."""
+    for d in malla.diafragmas:
+        a = _centro_de_diafragma(malla, d)
+        ux, uy, _, _, _, rz = tabla[a]
+        dx, dy = d.centro[:2] - malla.nodos[a][:2]
+        tabla[d.maestro] = [float(ux - rz * dy), float(uy + rz * dx), 0.0, 0.0, 0.0, float(rz)]
 
 
 def _material_area(seccion: str) -> str:
@@ -126,6 +177,7 @@ def analizar(modelo: Edificio) -> Resultados:
             d = _de_pynite((n.DX[k], n.DY[k], n.DZ[k]))
             r = _de_pynite((n.RX[k], n.RY[k], n.RZ[k]))
             res.desplazamientos[k][nid] = [*d, *r]
+        _agregar_maestros(res.desplazamientos[k], malla)
         for nid in malla.apoyos:
             n = fem.nodes[nid]
             F = _de_pynite((n.RxnFX[k], n.RxnFY[k], n.RxnFZ[k]))
@@ -162,7 +214,10 @@ def modal(modelo: Edificio, n_modos: int = 12) -> Modos:
             d = _de_pynite((n.DX[k], n.DY[k], n.DZ[k]))
             r = _de_pynite((n.RX[k], n.RY[k], n.RZ[k]))
             forma[nid] = [float(v) for v in (*d, *r)]
+        _agregar_maestros(forma, malla)
         res.formas.append(forma)
         if malla.elementos:
             res.fuerzas_elementos.append(_fuerzas_quads(fem, k))
     return res
+
+

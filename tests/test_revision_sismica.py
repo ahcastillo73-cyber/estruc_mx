@@ -145,3 +145,30 @@ def test_servicio_con_divisor_o_espectro(marco):
     rev2 = revisar(m2, modos, r, pynite)
     for d in "XY":  # misma forma espectral a la mitad: la mitad de la distorsión
         assert [x.deriva for x in rev2.derivas_servicio[d]] == pytest.approx([x.deriva / 2 for x in rev.derivas[d]])
+
+
+def test_torsion_con_diafragma_rigido_en_el_maestro():
+    """Con diafragma, el centro de masa es el del maestro y el momento va como MZ en un nodo
+    del piso; ambos motores dan el mismo giro del maestro."""
+    from estruc_mx.motores import opensees
+    from test_editor_niveles import con_diafragmas
+
+    pytest.importorskip("openseespy")
+    m = con_diafragmas(edificio_muros())
+    malla = discretizar(m)
+    lista = pisos(m, malla, masas_nodales(m, malla))
+    for p, d in zip(lista, malla.diafragmas):
+        assert p.diafragma is d and (p.xc, p.yc) == pytest.approx(tuple(d.centro[:2]))
+    giros = {}
+    for motor in (pynite, opensees):
+        modos = motor.modal(m, 8)
+        r = {d: espectral(m, modos, d) for d in "XY"}
+        rev = revisar(m, modos, r, motor)
+        assert not any("sin diafragma" in a for a in rev.avisos)
+        masas = masas_nodales(m, malla)
+        cargas = cargas_torsion(m, lista, rev.torsion["X"], masas, "T")
+        assert len(cargas) == len(lista) and all(c.fuerzas[:5] == (0, 0, 0, 0, 0) for c in cargas)
+        assert [c.fuerzas[5] for c in cargas] == pytest.approx([t.M0 for t in rev.torsion["X"]])
+        giros[motor.__name__] = [x.deriva for x in rev.derivas["X"]]
+    a, b = giros.values()
+    assert a == pytest.approx(b, rel=0.05)

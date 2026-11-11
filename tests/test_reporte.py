@@ -114,3 +114,13 @@ def test_reporte_con_muros_y_losas(tmp_path):
     assert len(tablas["Momentos en losas (kN·m/m), CM+CV"].filas) == 4
     for ext in (".pdf", ".docx"):
         assert escribir(doc, tmp_path / f"r{ext}").stat().st_size > 10_000
+
+
+def test_reporte_con_diafragmas(tmp_path):
+    from test_editor_niveles import con_diafragmas
+
+    m = con_diafragmas(construir_marco())
+    doc = construir(preparar(m, Opciones(n_modos=6)), ["modelo"])
+    tablas = [b for b in doc.bloques if isinstance(b, Tabla) and b.titulo.startswith("Diafragmas")]
+    assert len(tablas) == 1 and len(tablas[0].filas) == 3
+    escribir(doc, tmp_path / "r.pdf")

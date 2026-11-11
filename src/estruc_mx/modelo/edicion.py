@@ -21,7 +21,9 @@ from .edificio import (
     CargaDistribuida,
     CargaNodal,
     Combinacion,
+    Diafragma,
     Edificio,
+    MasaNodal,
     Material,
     Nodo,
     PatronCarga,
@@ -392,6 +394,188 @@ class Editor:
 
         self._aplicar(f"Editar barra {id_}", cambio)
 
+    def editar_muro(self, id_: str, p1: tuple[float, float], p2: tuple[float, float], z_inf: float, z_sup: float) -> None:
+        """Mueve un muro vertical: nuevos extremos en planta (x, y) y elevaciones de la base y la
+        corona. Conserva id, sección y cargas; los nodos que quedan sin uso se borran."""
+        if z_sup <= z_inf + TOLERANCIA:
+            raise ValueError("el muro necesita z_sup mayor que z_inf")
+        (x1, y1), (x2, y2) = p1, p2
+        esquinas = [(x1, y1, z_inf), (x2, y2, z_inf), (x2, y2, z_sup), (x1, y1, z_sup)]
+
+        def cambio(m: Edificio) -> None:
+            a = m.area(id_)
+            if a.tipo != "muro":
+                raise ValueError(f"'{id_}' es una losa, no un muro")
+            anteriores = set(a.nodos)
+            nuevos = tuple(_nodo_en(m, p) for p in esquinas)
+            if len(set(nuevos)) != 4:
+                raise ValueError("las cuatro esquinas deben ser nodos distintos")
+            for otra in m.areas:
+                if otra.id != id_ and set(otra.nodos) == set(nuevos):
+                    raise ValueError(f"ya hay un área ({otra.id}) en ese lugar")
+            a.nodos = nuevos
+            _borrar_nodos_sueltos(m, anteriores - set(nuevos))
+            if m.rejilla is not None and m.rejilla.niveles and math.isclose(z_inf, m.rejilla.niveles[0].z, abs_tol=TOLERANCIA):
+                _asignar_apoyo(m, list(nuevos[:2]), EMPOTRADO, solo_nuevos=True)
+
+        self._aplicar(f"Editar muro {id_}", cambio)
+
+    def dividir_area(self, id_: str, partes_1: int = 2, partes_2: int = 1) -> list[str]:
+        """Divide un muro o losa en partes_1 × partes_2 áreas (1: de la esquina 0 a la 1, a lo
+        largo del muro; 2: de la 0 a la 3, a lo alto). Las piezas conservan sección y cargas;
+        la primera conserva el id. Útil para abrir huecos o unir el área con nodos intermedios."""
+        if partes_1 < 1 or partes_2 < 1 or partes_1 * partes_2 < 2:
+            raise ValueError("indica al menos dos partes")
+
+        def cambio(m: Edificio) -> list[str]:
+            a = m.area(id_)
+            c = m.esquinas(a)
+            cargas = [ca for ca in m.cargas_area if ca.area == id_]
+            m.areas.remove(a)
+            m.cargas_area = [ca for ca in m.cargas_area if ca.area != id_]
+            existentes = {n.id for n in m.nodos}
+            ids: list[str] = []
+
+            def p(s: float, t: float) -> tuple[float, float, float]:
+                q = (1 - s) * (1 - t) * c[0] + s * (1 - t) * c[1] + s * t * c[2] + (1 - s) * t * c[3]
+                return tuple(float(v) for v in q)
+
+            for j in range(partes_2):
+                for i in range(partes_1):
+                    s0, s1, t0, t1 = i / partes_1, (i + 1) / partes_1, j / partes_2, (j + 1) / partes_2
+                    nodos = tuple(_nodo_en(m, q) for q in (p(s0, t0), p(s1, t0), p(s1, t1), p(s0, t1)))
+                    nid = id_ if not ids else _siguiente("L" if a.tipo == "losa" else "M", [o.id for o in m.areas] + [id_])
+                    m.areas.append(Area(id=nid, tipo=a.tipo, nodos=nodos, seccion=a.seccion))
+                    m.cargas_area += [ca.model_copy(update={"area": nid}) for ca in cargas]
+                    ids.append(nid)
+            # Los nodos nuevos sobre un borde entre dos apoyos iguales heredan el apoyo (la base de un
+            # muro empotrado sigue empotrada). Las barras sobre los bordes las parte la malla.
+            apoyos = {ap.nodo: ap.restricciones for ap in m.apoyos}
+            for k in range(4):
+                ra, rb = apoyos.get(a.nodos[k]), apoyos.get(a.nodos[(k + 1) % 4])
+                if ra is None or ra != rb:
+                    continue
+                p0, p1 = c[k], c[(k + 1) % 4]
+                sobre = [
+                    n.id for n in m.nodos
+                    if n.id not in existentes and _sobre_segmento(n.coords, p0, p1)
+                ]
+                _asignar_apoyo(m, sobre, ra, solo_nuevos=True)
+            return ids
+
+        return self._aplicar(f"Dividir {id_}", cambio)
+
+    # --- replicar -----------------------------------------------------------------
+    def replicar(
+        self,
+        desplazamientos: Iterable[tuple[float, float, float]],
+        nodos: Iterable[str] = (),
+        barras: Iterable[str] = (),
+        areas: Iterable[str] = (),
+        con_cargas: bool = True,
+    ) -> dict[str, int]:
+        """Copia nodos, barras, muros y losas desplazados por cada vector (dx, dy, dz), como
+        «Replicar» de ETABS. Las copias se unen con lo que ya existe en el mismo lugar y no se
+        duplica nada. Con `con_cargas`, cada copia nueva lleva las cargas del original; los nodos
+        nuevos llevan además su apoyo y su masa. Devuelve cuántos objetos nuevos creó."""
+        desplazamientos = [tuple(float(v) for v in d) for d in desplazamientos]
+        nodos, barras, areas = list(nodos), list(barras), list(areas)
+        if not desplazamientos:
+            raise ValueError("no hay a dónde replicar")
+        if all(math.isclose(v, 0.0, abs_tol=TOLERANCIA) for d in desplazamientos for v in d):
+            raise ValueError("el desplazamiento no puede ser cero")
+        if not (nodos or barras or areas):
+            raise ValueError("selecciona qué replicar")
+
+        def cambio(m: Edificio) -> dict[str, int]:
+            antes = (len(m.nodos), len(m.barras), len(m.areas))
+            fuente_b = [m.barra(b) for b in barras]
+            fuente_a = [m.area(a) for a in areas]
+            todos = list(dict.fromkeys([*nodos, *(n for b in fuente_b for n in (b.i, b.j)), *(n for a in fuente_a for n in a.nodos)]))
+            coords = {n: m.nodo(n).coords for n in todos}
+            apoyos = {a.nodo: a for a in m.apoyos}
+            c_nod = [c for c in m.cargas_nodales if c.nodo in coords]
+            c_dist = [c for c in m.cargas_distribuidas if c.barra in set(barras)]
+            c_area = [c for c in m.cargas_area if c.area in set(areas)]
+            masas = [mn for mn in m.masas_nodales if mn.nodo in coords]
+            for d in desplazamientos:
+                existentes = {n.id for n in m.nodos}
+                mapa = {n: _nodo_en(m, tuple(coords[n] + d)) for n in todos}
+                nuevos_n = {n for n, k in mapa.items() if k not in existentes}
+                if con_cargas:
+                    for n in nuevos_n:
+                        if n in apoyos:
+                            m.apoyos.append(Apoyo(nodo=mapa[n], restricciones=apoyos[n].restricciones))
+                    m.cargas_nodales += [c.model_copy(update={"nodo": mapa[c.nodo]}) for c in c_nod if c.nodo in nuevos_n]
+                    m.masas_nodales += [MasaNodal(nodo=mapa[mn.nodo], masa=mn.masa) for mn in masas if mn.nodo in nuevos_n]
+                for b in fuente_b:
+                    previas = {o.id for o in m.barras}
+                    nid = _barra_entre(m, mapa[b.i], mapa[b.j], b.seccion, b.tipo)
+                    if nid in previas:
+                        continue
+                    m.barra(nid).rotacion = b.rotacion
+                    if con_cargas:
+                        m.cargas_distribuidas += [c.model_copy(update={"barra": nid}) for c in c_dist if c.barra == b.id]
+                for a in fuente_a:
+                    previas = {o.id for o in m.areas}
+                    nid = _area_en(m, [mapa[n] for n in a.nodos], a.seccion, a.tipo)
+                    if nid in previas:
+                        continue
+                    if con_cargas:
+                        m.cargas_area += [c.model_copy(update={"area": nid}) for c in c_area if c.area == a.id]
+            return {"nodos": len(m.nodos) - antes[0], "barras": len(m.barras) - antes[1], "areas": len(m.areas) - antes[2]}
+
+        return self._aplicar("Replicar", cambio)
+
+    def replicar_a_niveles(
+        self, nivel_origen: str, niveles: Iterable[str], nodos: Iterable[str] = (), barras: Iterable[str] = (),
+        areas: Iterable[str] = (), con_cargas: bool = True,
+    ) -> dict[str, int]:
+        """Replica lo indicado desde un nivel de la rejilla a otros niveles (solo cambia Z)."""
+        r = self.modelo.rejilla if self.modelo is not None else None
+        if r is None or not r.niveles:
+            raise ValueError("hace falta una rejilla con niveles")
+        cotas = {nv.nombre: nv.z for nv in r.niveles}
+        faltan = [n for n in [nivel_origen, *niveles] if n not in cotas]
+        if faltan:
+            raise ValueError(f"niveles {faltan} no existen en la rejilla")
+        dz = [(0.0, 0.0, cotas[n] - cotas[nivel_origen]) for n in niveles if n != nivel_origen]
+        return self.replicar(dz, nodos, barras, areas, con_cargas)
+
+    # --- diafragmas -----------------------------------------------------------------
+    def asignar_diafragmas(self, niveles: Iterable[str | float], solo_estos: bool = False) -> None:
+        """Diafragma rígido en cada nivel (nombre de nivel de la rejilla o elevación); reemplaza
+        los que hubiera a esa altura. Se nombran como el nivel (o «D<z>»). Con `solo_estos`,
+        quita antes todos los demás."""
+        niveles = list(niveles)
+
+        def cambio(m: Edificio) -> None:
+            if solo_estos:
+                m.diafragmas = []
+            cotas = {nv.nombre: nv.z for nv in m.rejilla.niveles} if m.rejilla else {}
+            for nv in niveles:
+                if isinstance(nv, str):
+                    if nv not in cotas:
+                        raise ValueError(f"el nivel '{nv}' no existe en la rejilla")
+                    nombre, z = nv, cotas[nv]
+                else:
+                    z = float(nv)
+                    nombre = next((k for k, v in cotas.items() if math.isclose(v, z, abs_tol=TOLERANCIA)), f"D{z:g}")
+                m.diafragmas = [d for d in m.diafragmas if not math.isclose(d.z, z, abs_tol=TOLERANCIA) and d.nombre != nombre]
+                m.diafragmas.append(Diafragma(nombre=nombre, z=z))
+            m.diafragmas.sort(key=lambda d: d.z)
+
+        self._aplicar("Asignar diafragmas", cambio)
+
+    def quitar_diafragmas(self, nombres: Iterable[str] | None = None) -> None:
+        """Quita los diafragmas indicados (todos si no se indica ninguno)."""
+        nombres = None if nombres is None else set(nombres)
+
+        def cambio(m: Edificio) -> None:
+            m.diafragmas = [] if nombres is None else [d for d in m.diafragmas if d.nombre not in nombres]
+
+        self._aplicar("Quitar diafragmas", cambio)
+
     # --- asignaciones ---------------------------------------------------------
     def asignar_apoyo(self, nodos: Iterable[str], restricciones: tuple[bool, ...] | None) -> None:
         """`restricciones` = (UX, UY, UZ, RX, RY, RZ); None o todo libre quita el apoyo."""
@@ -576,6 +760,21 @@ def _area_en(m: Edificio, puntos: list[Punto], seccion: str, tipo: str | None) -
     id_ = _siguiente("L" if tipo == "losa" else "M", (a.id for a in m.areas))
     m.areas.append(Area(id=id_, tipo=tipo, nodos=tuple(ids), seccion=seccion))
     return id_
+
+
+def _sobre_segmento(p, a, b) -> bool:
+    d = b - a
+    t = float((p - a) @ d / (d @ d))
+    return -1e-9 < t < 1 + 1e-9 and float(((a + t * d - p) ** 2).sum()) ** 0.5 < TOLERANCIA
+
+
+def _borrar_nodos_sueltos(m: Edificio, candidatos: Iterable[str]) -> None:
+    """Borra los nodos indicados que ya no usa ninguna barra, área, carga ni masa (con su apoyo)."""
+    usados = {n for b in m.barras for n in (b.i, b.j)} | {n for a in m.areas for n in a.nodos}
+    usados |= {o.nodo for o in (*m.cargas_nodales, *m.masas_nodales)}
+    quitar = set(candidatos) - usados
+    m.nodos = [n for n in m.nodos if n.id not in quitar]
+    m.apoyos = [a for a in m.apoyos if a.nodo not in quitar]
 
 
 def _asignar_apoyo(m: Edificio, nodos: list[str], restricciones, solo_nuevos: bool = False) -> None:

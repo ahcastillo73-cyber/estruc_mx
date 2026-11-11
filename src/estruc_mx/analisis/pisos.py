@@ -27,6 +27,7 @@ class Piso:
     yc: float
     bx: float  # dimensión en planta en X, m
     by: float  # dimensión en planta en Y, m
+    diafragma: object | None = None  # DiafragmaMalla del nivel, si tiene diafragma rígido
 
 
 def niveles(modelo: Edificio) -> list[float]:
@@ -60,7 +61,9 @@ def pisos(modelo: Edificio, malla: Malla, masas: dict[str, float]) -> list[Piso]
     """Un `Piso` por nivel, con su masa, centro de masa y dimensiones en planta.
 
     Las dimensiones salen de los nodos del modelo que están exactamente en el nivel (sus
-    columnas, muros y losas); si no hay ninguno, de todos los nodos asignados."""
+    columnas, muros y losas); si no hay ninguno, de todos los nodos asignados. Si el nivel tiene
+    diafragma rígido, el centro de masa es el de su nodo maestro (modelo/diafragmas.py), para
+    que haya un solo cálculo."""
     zs = niveles(modelo)
     nivel = asignar(malla, zs)
     out = []
@@ -78,5 +81,9 @@ def pisos(modelo: Edificio, malla: Malla, masas: dict[str, float]) -> list[Piso]
         else:
             xc = yc = 0.0
         bx, by = (ext.max(axis=0) - ext.min(axis=0)) if len(ext) else (0.0, 0.0)
-        out.append(Piso(z=z, nodos=nodos, masa=mt, xc=float(xc), yc=float(yc), bx=float(bx), by=float(by)))
+        diafragma = next((d for d in malla.diafragmas if abs(d.z - z) < 1e-6), None)
+        if diafragma is not None:
+            xc, yc = diafragma.centro[:2]
+        out.append(Piso(z=z, nodos=nodos, masa=mt, xc=float(xc), yc=float(yc), bx=float(bx), by=float(by),
+                        diafragma=diafragma))
     return out

@@ -169,13 +169,24 @@ def _torsion_pisos(lista: list[Piso], r: RespuestaEspectral, c: CriteriosSismico
 
 def cargas_torsion(modelo: Edificio, lista: list[Piso], torsion: list[TorsionPiso],
                    masas: dict[str, float], patron: str) -> list[CargaNodal]:
-    """Momento de cada piso como par de fuerzas horizontales en los nodos del modelo del piso."""
+    """Momento M0 de cada piso.
+
+    Con diafragma rígido, un momento MZ en un nodo del piso: el diafragma lo lleva al maestro
+    igual que si se aplicara en él (el maestro no es un nodo del modelo, así que no puede llevar
+    cargas). Sin diafragma, un par de fuerzas horizontales en los nodos del modelo del piso,
+    proporcional a su masa y a su distancia al centro de masa."""
     del_modelo = {n.id for n in modelo.nodos}
     cargas = []
     for p, t in zip(lista, torsion):
         nodos = [n for n in p.nodos if n in del_modelo]
         if not nodos or t.M0 == 0:
             continue
+        if p.diafragma is not None:
+            esclavos = [n for n in p.diafragma.esclavos if n in del_modelo]
+            if esclavos:
+                n = min(esclavos, key=lambda n: (modelo.nodo(n).x - t.xc) ** 2 + (modelo.nodo(n).y - t.yc) ** 2)
+                cargas.append(CargaNodal(patron=patron, nodo=n, fuerzas=(0, 0, 0, 0, 0, t.M0)))
+                continue
         xy = np.array([[modelo.nodo(n).x - t.xc, modelo.nodo(n).y - t.yc] for n in nodos])
         w = np.array([masas.get(n, 0.0) for n in nodos])
         if w.sum() <= 0:
@@ -255,8 +266,10 @@ def revisar(modelo: Edificio, modos: Modos, respuestas: dict[str, RespuestaEspec
                     tors_derivas[d] = _derivas_estaticas(modelo, res.desplazamientos[f"TA{d}"])
                     if any(a.tipo == "muro" for a in modelo.areas):
                         tors_muros[d] = todas_fuerzas_muros(modelo, malla, res.fuerzas_elementos.get(f"TA{d}", {}))
-            rev.avisos.append("Torsión accidental repartida a los nodos de cada piso por rotación de cuerpo "
-                              "rígido; sin diafragma rígido es una aproximación.")
+            sin = [f"{p.z:g}" for p in lista if p.diafragma is None]
+            if sin:
+                rev.avisos.append(f"Niveles sin diafragma rígido ({', '.join(sin)} m): la torsión accidental se "
+                                  "reparte a sus nodos como rotación de cuerpo rígido, que es una aproximación.")
 
     # --- distorsiones con torsión y componentes ortogonales ----------------------
     por_sismo = {
