@@ -78,16 +78,21 @@ def modelo(d: DatosReporte) -> list[Bloque]:
         b.append(Titulo("Secciones de muro y losa", 2))
         usos = Counter(a.seccion for a in m.areas)
         b.append(Tabla(
-            ["Sección", "Tipo", "Material", "Espesor (cm)", "Mod. rigidez", "Áreas"],
-            [[s.nombre, s.tipo, s.material, _f(s.espesor * 100, 1), _f(s.mod_rigidez, 2), str(usos.get(s.nombre, 0))]
+            ["Sección", "Tipo", "Material", "Espesor (cm)", "Mod. rigidez", "Mod. cortante", "G (MPa)", "Áreas"],
+            [[s.nombre, s.tipo, s.material, _f(s.espesor * 100, 1), _f(s.mod_rigidez, 2), _f(s.mod_cortante, 2),
+              _f(m.modulos_area(s)[2] / 1000, 0), str(usos.get(s.nombre, 0))]
              for s in m.secciones_area],
             titulo="Secciones de muro y losa", texto={0, 1, 2},
         ))
         b.append(Parrafo(
             "Muros y losas se analizan como cáscaras elásticas (membrana más placa) divididas en elementos "
-            "de cuatro nodos. El módulo de cortante es G = E/(2(1 + ν)); para mampostería las NTC indican "
-            "G = 0.2·Em, que este modelo isótropo no reproduce.", "nota",
+            "de cuatro nodos. El módulo de cortante en el plano es G = E/(2(1 + ν)), salvo en mampostería, "
+            "donde es Gm = 0.2·Em (NTC Mampostería 2023, ec. 2.8.6.4.1) multiplicado por el modificador de "
+            "cortante de la sección (0.5 en muros agrietados, 3.1.1.2.3): los motores usan entonces un material "
+            "ortótropo con ese G en el plano.", "nota",
         ))
+        if any(x.tipo == "mamposteria" for x in m.materiales):
+            b.append(tabla_formulas(["mam_em", "mam_gm"]))
     if m.diafragmas:
         from ..modelo.malla import discretizar
 
@@ -527,6 +532,130 @@ def muros_losas(d: DatosReporte) -> list[Bloque]:
     return b
 
 
+# --- 10. Mampostería ----------------------------------------------------------
+_PIEZAS = {
+    "tabique_arcilla_artesanal": "tabique de arcilla artesanal", "tabique_arcilla_extruido": "tabique de arcilla extruido",
+    "bloque_concreto": "bloque de concreto", "tabicon_concreto": "tabicón de concreto", "otra_arcilla": "otra (arcilla)",
+    "otra_concreto": "otra (concreto)",
+}
+_MODALIDAD = {"confinada": "confinada", "reforzada_interior": "reforzada interiormente", "no_reforzada": "no reforzada"}
+
+
+def _estado(ok: bool) -> str:
+    return "sí" if ok else "NO"
+
+
+def mamposteria(d: DatosReporte) -> list[Bloque]:
+    from ..diseno.mamposteria import propiedades
+    from ..normas.ntc_mamposteria import modulo_elasticidad
+    from ..normas.ntc_sismo import DISTORSIONES_LIMITE
+
+    r = d.mamposteria
+    if r is None or not r.muros:
+        return []
+    m = d.modelo
+    b: list[Bloque] = [Titulo("Revisión de muros de mampostería")]
+    b.append(Parrafo(
+        "Revisión de cada muro según la NTC para Diseño y Construcción de Estructuras de Mampostería 2023 "
+        "(estructuras Tipo I). Las fuerzas son las del muro junto con sus castillos, en su base: los castillos "
+        "se modelan como barras en su eje (3.2.2.4) y un castillo compartido por varios muros del nivel se reparte "
+        "por partes iguales. La carga vertical se revisa con las combinaciones de gravedad factorizadas ("
+        + ", ".join(f"«{c}»" for c in r.combinaciones_gravedad) + "). "
+        + (f"El cortante y la flexocompresión se revisan con las fuerzas sísmicas de diseño (cortante mínimo, "
+           f"torsión accidental y 100 % + 30 %) por FC = {r.criterios.fc_accidental:g}, más la gravedad de "
+           f"«{r.combinacion_sismo}» ({' + '.join(f'{v:g}·{k}' for k, v in r.factores_sismo.items())})."
+           if r.con_sismo else "No hay revisión sísmica: el cortante no se revisó.")
+    ))
+    # --- materiales y refuerzo ---
+    b.append(Titulo("Materiales y refuerzo", 2))
+    filas = []
+    for nombre in sorted({w.material for w in r.muros}):
+        p, supuesto = propiedades(m, nombre)
+        mat = m.material(nombre)
+        filas.append([
+            nombre + (" (supuesto)" if supuesto else ""), _PIEZAS[p.pieza] + (", hueca" if p.hueca else ", maciza"),
+            p.mortero, _f(p.fm / 1000, 2), _f(p.vm / 1000, 2), _f(mat.E / 1000, 0),
+            _f(modulo_elasticidad(p.fm, p.de_concreto) / 1000, 0), _f(mat.G / 1000, 0),
+        ])
+    b.append(Tabla(["Material", "Pieza", "Mortero", "f'm (MPa)", "v'm (MPa)", "E modelo (MPa)", "Em de 2.8.5.4 (MPa)",
+                    "Gm (MPa)"], filas, titulo="Propiedades de diseño de la mampostería", texto={0, 1, 2}))
+    filas = []
+    for nombre in sorted({w.seccion for w in r.muros}):
+        s = m.seccion_area(nombre)
+        x = s.mamposteria
+        if x is None:
+            filas.append([nombre, "confinada (supuesta)", "15 × 15", "4 #3 (2.85)", "-", "-", "-"])
+            continue
+        filas.append([
+            nombre, _MODALIDAD[x.modalidad], f"{x.castillo_b * 100:.0f} × {x.castillo_h * 100:.0f}",
+            f"{x.castillo_barras} barras ({x.castillo_As * 1e4:.2f})",
+            f"{x.estribo_Asc * 1e4:.2f} @ {x.estribo_s * 100:.0f} ({x.estribo_s_extremo * 100:.1f})",
+            f"{x.dala_b * 100:.0f} × {x.dala_h * 100:.0f}",
+            "-" if x.ph_fyh(s.espesor) <= 0 else f"{x.Ash * 1e4:.2f} cm² @ {x.sh * 100:.0f} cm "
+                                                  f"(ph·fyh = {x.ph_fyh(s.espesor) / 1000:.2f} MPa)",
+        ])
+    b.append(Tabla(["Sección", "Modalidad", "Castillo (cm)", "As castillo (cm²)", "Estribos Asc (cm²) @ s (extremos), cm",
+                    "Dala (cm)", "Refuerzo horizontal"], filas, titulo="Refuerzo de los muros",
+                   texto={0, 1, 2, 3, 4, 5, 6}))
+    # --- resistencias ---
+    b.append(Titulo("Resistencias", 2))
+    b.append(tabla_formulas(["mam_pr", "mam_fe", "mam_fe_ec", "mam_vr", "mam_vmr", "mam_f", "mam_vsr", "mam_eta",
+                             "mam_k0k1", "mam_mr", "mam_mr_tension", "mam_fc"],
+                            "Fórmulas de referencia, resistencias de muros"))
+    filas = []
+    for w in r.muros:
+        filas.append([
+            w.muro, _f(w.z, 2), w.direccion, _f(w.L, 2), _f(w.t * 100, 0), _f(w.FE, 2), _f(w.Pu, 1), _f(w.PR, 1),
+            "-" if w.Vu is None else _f(w.Vu, 1), "-" if w.Vu is None else _f(w.VR, 1),
+            "-" if w.Mu is None else _f(w.Mu, 1), "-" if w.MR is None else _f(w.MR, 1), _f(w.relacion, 2),
+            _estado(all(c.cumple for c in w.comprobaciones if c.resistencia)),
+        ])
+    b.append(Tabla(["Muro", "Base (m)", "Dir.", "L (m)", "t (cm)", "FE", "Pu (kN)", "PR (kN)", "Vu (kN)", "VR (kN)",
+                    "Mu (kN·m)", "MR (kN·m)", "D/C", "Cumple"], filas,
+                   titulo="Carga vertical, cortante y flexocompresión en el plano", texto={0, 2, 13}))
+    filas = [[w.muro, _f(w.P_cortante or 0, 1), _f(w.f, 3), _f(w.VmR, 1), _f(w.ph_fyh / 1000, 2), _f(w.eta, 3),
+              _f(w.VsR, 1)] for w in r.muros if w.Vu is not None]
+    if filas:
+        b.append(Tabla(["Muro", "P (kN)", "f", "VmR (kN)", "ph·fyh (MPa)", "η", "VsR (kN)"], filas,
+                       titulo="Detalle del cortante resistente"))
+    # --- requisitos ---
+    b.append(Titulo("Requisitos de castillos, dalas y refuerzo", 2))
+    b.append(tabla_formulas(["mam_sep", "mam_as", "mam_asc"], "Fórmulas de referencia, requisitos"))
+    fallas = [[w.muro, c.concepto, c.articulo, "-" if c.demanda is None else _f(c.demanda, 2),
+               "-" if c.capacidad is None else _f(c.capacidad, 2), c.unidad, c.detalle]
+              for w in r.muros for c in w.comprobaciones if not c.resistencia and not c.cumple]
+    if fallas:
+        b.append(Tabla(["Muro", "Requisito", "Artículo", "Valor", "Límite", "Unidad", "Nota"], fallas,
+                       titulo="Requisitos que no se cumplen", texto={0, 1, 2, 5, 6}))
+    else:
+        b.append(Parrafo("Todos los muros cumplen los requisitos de geometría y refuerzo revisados."))
+    revisados = sorted({c.concepto for w in r.muros for c in w.comprobaciones if not c.resistencia})
+    b.append(Parrafo("Requisitos revisados: " + ", ".join(revisados) + ".", "nota"))
+    # --- entrepiso ---
+    if r.entrepisos:
+        b.append(Titulo("Cortante resistente de entrepiso", 2))
+        b.append(tabla_formulas(["mam_entrepiso"]))
+        b.append(Tabla(
+            ["Dirección", "Entrepiso (m)", "Muros", "ΣAT (m²)", "σ (kPa)", "VR (kN)", "0.8·Vu (kN)", "Cumple"],
+            [[e.direccion, f"{e.z_base:g} a {e.z_tope:g}", str(len(e.muros)), _f(e.AT, 3), _f(e.sigma, 1), _f(e.VR, 1),
+              _f(0.8 * e.Vu, 1), _estado(e.cumple)] for e in r.entrepisos],
+            titulo="Revisión del cortante de entrepiso", texto={0, 1, 7},
+        ))
+    # --- conclusión ---
+    desc = DISTORSIONES_LIMITE[r.sistema][0]
+    malos = [w.muro for w in r.muros if not w.cumple]
+    b.append(Parrafo(
+        f"Sistema: {desc[0].lower() + desc[1:]}; Q = {r.Q:g} (4.1.13 y NTC Sismo, tabla 4.3.3"
+        + (", reducido en 0.5 por tener más de seis niveles" if r.niveles > 6 else "") + "). "
+        + ("Todos los muros y entrepisos cumplen." if r.cumple else
+           f"No cumplen {len(malos)} de {len(r.muros)} muros: {', '.join(malos)}."
+           + ("" if all(e.cumple for e in r.entrepisos) else " Hay entrepisos que no cumplen."))
+    , "normal" if r.cumple else "aviso"))
+    avisos = list(r.avisos) + sorted({a for w in r.muros for a in w.avisos})
+    b.extend(Parrafo(a, "nota") for a in avisos)
+    return b
+
+
 # --- Avisos --------------------------------------------------------------------
 def notas(d: DatosReporte) -> list[Bloque]:
     elementos = list(d.avisos) + [
@@ -558,5 +687,6 @@ SECCIONES: dict[str, Seccion] = {
     "derivas": derivas,
     "deformadas": deformadas,
     "muros": muros_losas,
+    "mamposteria": mamposteria,
     "notas": notas,
 }

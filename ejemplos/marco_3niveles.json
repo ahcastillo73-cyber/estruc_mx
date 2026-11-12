@@ -6,7 +6,9 @@
       "tipo": "concreto",
       "E": 22000000.0,
       "nu": 0.2,
-      "peso_vol": 24.0
+      "peso_vol": 24.0,
+      "G_cortante": null,
+      "mamposteria": null
     }
   ],
   "secciones": [
@@ -813,6 +815,8 @@
     "beta": 1.0,
     "reduccion": 1.0
   },
+  "espectro_servicio": null,
+  "diafragmas": [],
   "tamano_malla": 1.0,
   "rejilla": null
 }

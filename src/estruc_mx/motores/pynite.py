@@ -18,6 +18,7 @@ from __future__ import annotations
 import math
 
 from Pynite import FEModel3D
+from Pynite.Quad3D import Quad3D
 
 import numpy as np
 
@@ -26,6 +27,20 @@ from ..modelo.malla import Malla, discretizar
 from ..modelo.masas import G, peso_lineal
 from .comun import combinaciones_efectivas
 from .resultados import Modos, Resultados
+
+
+class _QuadCortante(Quad3D):
+    """Quad3D de PyNite con módulo de cortante en el plano propio (mampostería, Gm = 0.2·Em).
+
+    PyNite calcula G = E/(2(1 + ν)) en la matriz de membrana; aquí se reemplaza solo ese término.
+    La flexión y el cortante transversal quedan como los calcula PyNite."""
+
+    G_plano: float
+
+    def Cm(self):  # noqa: N802 - nombre de PyNite
+        Cm = super().Cm()
+        Cm[2, 2] = self.G_plano
+        return Cm
 
 
 def _a_pynite(v):
@@ -50,10 +65,12 @@ def construir(modelo: Edificio, malla: Malla | None = None) -> FEModel3D:
     for s in modelo.secciones:
         # Iy de PyNite = menor (I22), Iz de PyNite = mayor (I33)
         fem.add_section(s.nombre, s.A, s.I22, s.I33, s.J)
+    G_plano = {}
     for s in modelo.secciones_area:
-        m = modelo.material(s.material)
-        E = m.E * s.mod_rigidez
-        fem.add_material(_material_area(s.nombre), E, E / (2 * (1 + m.nu)), m.nu, 0.0)
+        E, nu, Gp = modelo.modulos_area(s)
+        fem.add_material(_material_area(s.nombre), E, E / (2 * (1 + nu)), nu, 0.0)
+        if abs(Gp - E / (2 * (1 + nu))) > 1e-9 * E:
+            G_plano[s.nombre] = Gp
     for nid, p in malla.nodos.items():
         fem.add_node(nid, *_a_pynite(p))
     for nid, (ux, uy, uz, rx, ry, rz) in malla.apoyos.items():
@@ -67,6 +84,10 @@ def construir(modelo: Edificio, malla: Malla | None = None) -> FEModel3D:
     for e in malla.elementos:
         sec = seccion[e.area]
         fem.add_quad(e.id, *e.nodos, espesor[sec], _material_area(sec))
+        if sec in G_plano:
+            q = fem.quads[e.id]
+            q.__class__ = _QuadCortante
+            q.G_plano = G_plano[sec]
 
     _diafragmas(fem, modelo, malla)
 

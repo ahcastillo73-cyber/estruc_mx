@@ -25,9 +25,9 @@ def test_preparar_corre_todos_los_analisis(datos):
 def test_documento_tiene_todas_las_secciones_numeradas(datos):
     doc = construir(datos)
     titulos = [b for b in doc.bloques if isinstance(b, Titulo) and b.nivel == 1]
-    # «muros» no aparece en un modelo sin muros ni losas
-    assert len(titulos) == len(SECCIONES) - 1
-    assert [t.numero for t in titulos] == [f"{i}." for i in range(1, len(SECCIONES))]
+    # «muros» y «mamposteria» no aparecen en un modelo sin muros ni losas
+    assert len(titulos) == len(SECCIONES) - 2
+    assert [t.numero for t in titulos] == [f"{i}." for i in range(1, len(SECCIONES) - 1)]
     figuras = [b for b in doc.bloques if isinstance(b, Figura)]
     assert figuras and all(f.png.startswith(b"\x89PNG") for f in figuras)
     assert all(f.numero.startswith("Figura") for f in figuras)

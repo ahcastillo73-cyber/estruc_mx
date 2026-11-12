@@ -101,6 +101,8 @@ class RespuestaEspectral:
     derivas: list[Deriva]  # la máxima por nivel, de abajo hacia arriba
     # muro -> P, V, M, Vfp, Mfp, T combinados (valores positivos), en la base de cada muro
     fuerzas_muros: dict[str, dict[str, float]] = field(default_factory=dict)
+    # Igual, para cada muro junto con sus castillos (analisis/pilas.py)
+    fuerzas_pilas: dict[str, dict[str, float]] = field(default_factory=dict)
     # Cortante por entrepiso: (elevación del nivel de arriba, V en kN), de abajo hacia arriba
     cortantes_entrepiso: list[tuple[float, float]] = field(default_factory=list)
     # Distorsión de cada tramo vertical en ambas direcciones (para torsión y 100/30)
@@ -175,6 +177,7 @@ def espectral(
             ])
             comb = _combinar(por_modo, rho)
             fuerzas_muros[area] = {c: float(v) for c, v in zip(COMPONENTES_MURO, comb)}
+    fuerzas_pilas = _fuerzas_pilas(modelo, malla, modos, validos, amp, rho) if modos.fuerzas_elementos else {}
 
     return RespuestaEspectral(
         direccion=direccion,
@@ -186,9 +189,27 @@ def espectral(
         cortante_basal_modal=[float(v) for v in V_modal],
         derivas=[por_nivel[z] for z in sorted(por_nivel)],
         fuerzas_muros=fuerzas_muros,
+        fuerzas_pilas=fuerzas_pilas,
         cortantes_entrepiso=cortantes,
         derivas_elementos=por_elemento,
     )
+
+
+def _fuerzas_pilas(modelo, malla, modos, validos, amp, rho) -> dict[str, dict[str, float]]:
+    """Fuerzas de muro más castillos combinadas modo por modo (con su signo en cada modo)."""
+    from .pilas import castillos_muros, todas_fuerzas_pilas
+
+    bases = bases_muros(modelo, malla)
+    cast = castillos_muros(modelo, malla, bases)
+    if not any(cast.values()):
+        return {}
+    por_modo = [todas_fuerzas_pilas(modelo, malla, modos.fuerzas_elementos[i], modos.formas[i],
+                                    bases=bases, castillos=cast) for i in validos]
+    out = {}
+    for area in bases:
+        v = np.array([[f[area][c] * a for c in COMPONENTES_MURO] for f, a in zip(por_modo, amp)])
+        out[area] = {c: float(x) for c, x in zip(COMPONENTES_MURO, _combinar(v, rho))}
+    return out
 
 
 def elementos_verticales(modelo: Edificio):
