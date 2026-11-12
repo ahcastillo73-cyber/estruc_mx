@@ -41,6 +41,9 @@ Name: "path"; Description: "Añadir estruc-mx-cli al PATH del usuario (línea de
 
 [Files]
 Source: "..\..\dist\estruc-mx\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; Licencia y avisos de terceros a la vista en la carpeta de instalación
+Source: "..\..\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreversion
+Source: "..\..\AVISOS_TERCEROS.md"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\estruc-mx"; Filename: "{app}\estruc-mx.exe"

@@ -20,6 +20,8 @@ WINDOWS = sys.platform == "win32"
 MACOS = sys.platform == "darwin"
 
 datas = [(str(RAIZ / "ejemplos" / "marco_3niveles.json"), "ejemplos")]
+# Licencia propia y avisos de terceros (GPL: deben acompañar a cada copia)
+datas += [(str(RAIZ / "LICENSE"), "."), (str(RAIZ / "AVISOS_TERCEROS.md"), ".")]
 binaries = []
 hiddenimports = collect_submodules("estruc_mx")
 
@@ -27,6 +29,7 @@ hiddenimports = collect_submodules("estruc_mx")
 # script del motor lo importa en tiempo de ejecución: se incluye completo.
 for paquete in ("openseespy", "openseespylinux", "openseespymac", "openseespywin"):
     if importlib.util.find_spec(paquete) is not None:
+        # collect_all trae también su LICENSE.md, que debe acompañar al binario
         d, b, h = collect_all(paquete)
         datas += d
         binaries += b

@@ -1,5 +1,6 @@
 [build-system]
-requires = ["hatchling>=1.24"]
+# 1.27: campos license y license-files (PEP 639)
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
@@ -7,6 +8,8 @@ name = "estruc-mx"
 version = "0.1.0"
 description = "Análisis estructural de edificios con PyNite y OpenSees, basado en NTC 2023 y CFE"
 readme = "README.md"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE", "AVISOS_TERCEROS.md"]
 requires-python = ">=3.12"
 dependencies = [
     "numpy>=1.26",

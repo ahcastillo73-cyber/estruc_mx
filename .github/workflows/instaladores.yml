@@ -99,7 +99,7 @@ jobs:
           "$exe" analizar ejemplos/marco_3niveles.json --motor pynite
           "$exe" analizar ejemplos/marco_3niveles.json --motor opensees
           "$exe" modal ejemplos/marco_3niveles.json --motor opensees --modos 6
-          "$exe" reporte ejemplos/marco_3niveles.json -o build/prueba.pdf --sistema marco_ductil_concreto
+          "$exe" reporte ejemplos/marco_3niveles.json -o build/prueba.pdf --sistema marco_concreto_alta
           "$exe" reporte ejemplos/marco_3niveles.json -o build/prueba.docx
           ls -l build/prueba.pdf build/prueba.docx
 

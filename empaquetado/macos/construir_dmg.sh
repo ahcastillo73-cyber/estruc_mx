@@ -8,6 +8,9 @@ CARPETA=build/dmg
 rm -rf "$CARPETA"
 mkdir -p "$CARPETA" instaladores
 cp -R dist/estruc-mx.app "$CARPETA/"
+# Licencia y avisos de terceros junto a la app en el .dmg
+cp LICENSE "$CARPETA/LICENSE.txt"
+cp AVISOS_TERCEROS.md "$CARPETA/"
 ln -s /Applications "$CARPETA/Aplicaciones"
 # Sin firma de Apple: PyInstaller firma ad hoc, suficiente para Apple Silicon.
 # El primer arranque requiere clic derecho > Abrir (ver README).
